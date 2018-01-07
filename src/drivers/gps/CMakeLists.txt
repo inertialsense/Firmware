@@ -43,7 +43,14 @@ px4_add_module(
 		devices/src/mtk.cpp
 		devices/src/ashtech.cpp
 		devices/src/ubx.cpp
+		devices/src/inertialsense.cpp
+		devices/src/InertialSenseSDK/src/com_manager.c
+		devices/src/InertialSenseSDK/src/data_sets.c
 	DEPENDS
 		platforms__common
 		git_gps_devices
+	COMPILE_FLAGS
+    -DCPU_IS_BIG_ENDIAN=0
+    -DCPU_IS_LITTLE_ENDIAN=1
+    -Wno-unused-local-typedefs
 	)
