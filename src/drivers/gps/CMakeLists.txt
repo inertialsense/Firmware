@@ -52,7 +52,7 @@ px4_add_module(
 	COMPILE_FLAGS
     -DCPU_IS_BIG_ENDIAN=0
     -DCPU_IS_LITTLE_ENDIAN=1
-    -DPKT_BUF_SIZE=30
-    -DMAX_DATASET_SIZE=80
+    -DPKT_BUF_SIZE=200
+    -DMAX_DATASET_SIZE=150
     -Wno-unused-local-typedefs
 	)
