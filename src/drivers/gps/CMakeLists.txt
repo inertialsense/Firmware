@@ -46,13 +46,15 @@ px4_add_module(
 		devices/src/inertialsense.cpp
 		devices/src/InertialSenseSDK/src/com_manager.c
 		devices/src/InertialSenseSDK/src/data_sets.c
+    devices/src/InertialSenseSDK/src/ISPose.c
+    devices/src/InertialSenseSDK/src/ISMatrix.c
 	DEPENDS
 		platforms__common
 		git_gps_devices
 	COMPILE_FLAGS
     -DCPU_IS_BIG_ENDIAN=0
     -DCPU_IS_LITTLE_ENDIAN=1
-    -DPKT_BUF_SIZE=200
+    -DPKT_BUF_SIZE=300
     -DMAX_DATASET_SIZE=150
     -Wno-unused-local-typedefs
 	)
