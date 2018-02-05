@@ -43,18 +43,14 @@ px4_add_module(
 		devices/src/mtk.cpp
 		devices/src/ashtech.cpp
 		devices/src/ubx.cpp
-		devices/src/inertialsense.cpp
-		devices/src/InertialSenseSDK/src/com_manager.c
-		devices/src/InertialSenseSDK/src/data_sets.c
-    devices/src/InertialSenseSDK/src/ISPose.c
-    devices/src/InertialSenseSDK/src/ISMatrix.c
+    devices/src/inertialsense.cpp
+    devices/src/inertialsense_serial_protocol/data_sets.c
+    devices/src/inertialsense_serial_protocol/ISComm.c
 	DEPENDS
 		platforms__common
 		git_gps_devices
 	COMPILE_FLAGS
-    -DCPU_IS_BIG_ENDIAN=0
-    -DCPU_IS_LITTLE_ENDIAN=1
-    -DPKT_BUF_SIZE=300
-    -DMAX_DATASET_SIZE=150
+    -DARM
     -Wno-unused-local-typedefs
 	)
+
