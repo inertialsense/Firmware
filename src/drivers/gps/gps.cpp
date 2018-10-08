@@ -853,6 +853,10 @@ GPS::print_status()
 			PX4_INFO("protocol: ASHTECH");
 			break;
 
+        case GPS_DRIVER_MODE_INERTIALSENSE:
+            PX4_INFO("protocol: INERTIALSENSE");
+            break;
+
 		default:
 			break;
 		}
@@ -1082,6 +1086,9 @@ GPS *GPS::instantiate(int argc, char *argv[], Instance instance)
 
 			} else if (!strcmp(myoptarg, "ash")) {
 				mode = GPS_DRIVER_MODE_ASHTECH;
+
+            } else if (!strcmp(myoptarg, "is")) {
+                mode = GPS_DRIVER_MODE_INERTIALSENSE;
 
 			} else {
 				PX4_ERR("unknown interface: %s", myoptarg);
