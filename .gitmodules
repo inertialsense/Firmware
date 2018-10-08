@@ -40,7 +40,7 @@
 	branch = master
 [submodule "src/drivers/gps/devices"]
 	path = src/drivers/gps/devices
-	url = https://github.com/PX4/GpsDrivers.git
+	url = https://github.com/inertialsense/GpsDrivers.git
 	branch = master
 [submodule "src/modules/micrortps_bridge/micro-CDR"]
 	path = src/modules/micrortps_bridge/micro-CDR

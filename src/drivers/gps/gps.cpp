@@ -86,6 +86,7 @@
 #include "devices/src/ubx.h"
 #include "devices/src/mtk.h"
 #include "devices/src/ashtech.h"
+#include "devices/src/inertialsense.h"
 
 
 #define TIMEOUT_5HZ 500
@@ -688,6 +689,10 @@ GPS::run()
 				_helper = new GPSDriverAshtech(&GPS::callback, this, &_report_gps_pos, _p_report_sat_info, heading_offset);
 				break;
 
+			case GPS_DRIVER_MODE_INERTIALSENSE:
+				_helper = new GPSDriverInertialSense(_interface, &GPS::callback, this, &_report_gps_pos, _p_report_sat_info);
+				break;
+
 			default:
 				break;
 			}
@@ -776,6 +781,10 @@ GPS::run()
 					break;
 
 				case GPS_DRIVER_MODE_ASHTECH:
+					_mode = GPS_DRIVER_MODE_INERTIALSENSE;
+					break;
+
+				case GPS_DRIVER_MODE_INERTIALSENSE:
 					_mode = GPS_DRIVER_MODE_UBX;
 					usleep(500000); // tried all possible drivers. Wait a bit before next round
 					break;
