@@ -689,9 +689,9 @@ GPS::run()
 				_helper = new GPSDriverAshtech(&GPS::callback, this, &_report_gps_pos, _p_report_sat_info, heading_offset);
 				break;
 
-//			case GPS_DRIVER_MODE_INERTIALSENSE:
-//				_helper = new GPSDriverInertialSense(_interface, &GPS::callback, this, &_report_gps_pos, _p_report_sat_info);
-//				break;
+            case GPS_DRIVER_MODE_INERTIALSENSE:
+                _helper = new GPSDriverInertialSense(_interface, &GPS::callback, this, &_report_gps_pos, _p_report_sat_info);
+                break;
 
 			default:
 				break;
