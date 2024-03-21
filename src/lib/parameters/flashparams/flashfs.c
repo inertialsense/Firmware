@@ -42,8 +42,8 @@
  * foot print device.
  */
 
-#include <px4_defines.h>
-#include <px4_posix.h>
+#include <px4_platform_common/defines.h>
+#include <px4_platform_common/posix.h>
 #include <crc32.h>
 #include <stddef.h>
 #include <string.h>
@@ -54,6 +54,9 @@
 #include "flashfs.h"
 #include <nuttx/compiler.h>
 #include <nuttx/progmem.h>
+#include <board_config.h>
+
+#if defined(CONFIG_ARCH_HAVE_PROGMEM) || defined(BOARD_USE_EXTERNAL_FLASH)
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -83,11 +86,10 @@ typedef enum  flash_flags_t {
 } flash_flags_t;
 
 
-/* File flash_entry_header_t will be sizeof(h_magic_t) aligned
+/* The struct flash_entry_header_t will be sizeof(uint32_t) aligned
  * The Size will be the actual length of the header plus the data
  * and any padding needed to have the size be an even multiple of
- * sizeof(h_magic_t)
- *  The
+ * sizeof(uint32_t)
  */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
@@ -99,7 +101,7 @@ typedef begin_packed_struct struct flash_entry_header_t {
                                                * Will result the offset of the next active file or
                                                * free space. */
 	flash_file_token_t   file_token;      /* file token type - essentially the name/type */
-} end_packed_struct flash_entry_header_t;
+} end_packed_struct flash_entry_header_t __attribute__((aligned(sizeof(uint32_t))));
 #pragma GCC diagnostic pop
 
 /****************************************************************************
@@ -337,7 +339,7 @@ static inline int entry_size_adjust(flash_entry_header_t *fi)
 static inline flash_entry_header_t *next_entry(flash_entry_header_t *fi)
 {
 	uint8_t *pb = (uint8_t *)fi;
-	return (flash_entry_header_t *) &pb[fi->size];
+	return (flash_entry_header_t *)(pb + fi->size);
 }
 
 /****************************************************************************
@@ -447,22 +449,29 @@ static flash_entry_header_t *find_entry(flash_file_token_t token)
 		/* Hunt for Magic Signature */
 cont:
 
-		while (pmagic != pe && !valid_magic(pmagic)) {
+		while (pmagic < pe && !valid_magic(pmagic)) {
 			pmagic++;
 		}
 
 		/* Did we reach the end
 		 * if so try the next sector */
 
-		if (pmagic == pe) { continue; }
+		if (pmagic >= pe) { continue; }
 
 		/* Found a magic So assume it is a file header */
 
 		flash_entry_header_t *pf = (flash_entry_header_t *) pmagic;
 
-		/* Test the CRC */
+		/* Ensure that the header is fully inside the current sector */
 
-		if (pf->crc == crc32(entry_crc_start(pf), entry_crc_length(pf))) {
+		if (pf + 1 > (flash_entry_header_t *)pe) { continue; }
+
+		const uint8_t *crc_start = entry_crc_start(pf);
+		data_size_t crc_length = entry_crc_length(pf);
+
+		if (crc_start + crc_length > (uint8_t *)pe) { continue; }
+
+		if (pf->crc == crc32(crc_start, crc_length)) {
 
 			/* Good CRC is it the one we are looking for ?*/
 
@@ -479,19 +488,19 @@ cont:
 
 				/* If the next one is erased */
 
-				if (blank_entry(pf)) {
+				if (pmagic >= pe || blank_entry(pf)) {
 					continue;
 				}
 			}
 
-			goto cont;
-
 		} else {
 
-			/* in valid CRC so keep looking */
+			/* invalid CRC so keep looking */
 
 			pmagic++;
 		}
+
+		goto cont;
 	}
 
 	return NULL;
@@ -527,6 +536,10 @@ static flash_entry_header_t *find_free(data_size_t required)
 
 				flash_entry_header_t *pf = (flash_entry_header_t *) pmagic;
 
+				/* Ensure that the header is fully inside the current sector */
+
+				if (pf + 1 > (flash_entry_header_t *)pe) { break; }
+
 				/* Test the CRC */
 
 				if (pf->crc == crc32(entry_crc_start(pf), entry_crc_length(pf))) {
@@ -541,7 +554,7 @@ static flash_entry_header_t *find_free(data_size_t required)
 				}
 			}
 
-			if (blank_magic(pmagic)) {
+			if (pmagic + (required / sizeof(h_magic_t)) <= pe && blank_magic(pmagic)) {
 
 				flash_entry_header_t *pf = (flash_entry_header_t *) pmagic;
 
@@ -550,7 +563,7 @@ static flash_entry_header_t *find_free(data_size_t required)
 				}
 
 			}
-		}  while (++pmagic != pe);
+		}  while (++pmagic < pe);
 	}
 
 	return NULL;
@@ -593,7 +606,7 @@ static sector_descriptor_t *get_next_sector_descriptor(sector_descriptor_t *
 }
 
 /****************************************************************************
- * Name: get_next_sector
+ * Name: get_sector_info
  *
  * Description:
  *   Given a pointer to a flash entry header returns the sector descriptor
@@ -645,11 +658,19 @@ static sector_descriptor_t *get_sector_info(flash_entry_header_t *current)
 static int erase_sector(sector_descriptor_t *sm, flash_entry_header_t *pf)
 {
 	int rv = 0;
-	ssize_t page = up_progmem_getpage((size_t)pf);
+#if defined(BOARD_USE_EXTERNAL_FLASH)
+	ssize_t block = up_progmem_ext_getpage((size_t)pf);
+#else
+	ssize_t block = up_progmem_getpage((size_t)pf);
+#endif
 
-	if (page > 0 && page == sm->page) {
+	if (block > 0 && block == sm->page) {
 		last_erased = sm->page;
-		ssize_t size = up_progmem_erasepage(page);
+#if defined(BOARD_USE_EXTERNAL_FLASH)
+		ssize_t size = up_progmem_ext_eraseblock(block);
+#else
+		ssize_t size = up_progmem_eraseblock(block);
+#endif
 
 		if (size < 0 || size != (ssize_t)sm->size) {
 			rv = size;
@@ -679,7 +700,11 @@ static int erase_entry(flash_entry_header_t *pf)
 {
 	h_flag_t data = ErasedEntry;
 	size_t size = sizeof(h_flag_t);
+#if defined(BOARD_USE_EXTERNAL_FLASH)
+	int rv = up_progmem_ext_write((size_t) &pf->flag, &data, size);
+#else
 	int rv = up_progmem_write((size_t) &pf->flag, &data, size);
+#endif
 	return rv;
 }
 
@@ -861,11 +886,13 @@ parameter_flashfs_write(flash_file_token_t token, uint8_t *buffer, size_t buf_si
 				}
 
 				pf = (flash_entry_header_t *) current_sector->address;
+
+				if (!blank_check(pf, total_size)) {
+					rv = erase_sector(current_sector, pf);
+				}
+
 			}
 
-			if (!blank_check(pf, total_size)) {
-				rv = erase_sector(current_sector, pf);
-			}
 		}
 
 		flash_entry_header_t *pn = (flash_entry_header_t *)(buffer - sizeof(flash_entry_header_t));
@@ -879,7 +906,11 @@ parameter_flashfs_write(flash_file_token_t token, uint8_t *buffer, size_t buf_si
 		}
 
 		pn->crc = crc32(entry_crc_start(pn), entry_crc_length(pn));
+#if defined(BOARD_USE_EXTERNAL_FLASH)
+		rv = up_progmem_ext_write((size_t) pf, pn, pn->size);
+#else
 		rv = up_progmem_write((size_t) pf, pn, pn->size);
+#endif
 		int system_bytes = (sizeof(flash_entry_header_t) + size_adjust);
 
 		if (rv >= system_bytes) {
@@ -1028,7 +1059,7 @@ int parameter_flashfs_init(sector_descriptor_t *fconfig, uint8_t *buffer, uint16
 
 	flash_entry_header_t *pf = find_entry(parameters_token);
 
-	/*  No paramaters */
+	/*  No parameters */
 
 	if (pf == NULL) {
 		size_t total_size = size + sizeof(flash_entry_header_t);
@@ -1116,3 +1147,4 @@ __EXPORT void test(void)
 	free(buffer);
 }
 #endif /* FLASH_UNIT_TEST */
+#endif /* CONFIG_ARCH_HAVE_PROGMEM */

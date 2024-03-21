@@ -30,12 +30,18 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
+
 px4_add_module(
 	MODULE modules__fw_att_control
 	MAIN fw_att_control
 	SRCS
 		FixedwingAttitudeControl.cpp
+		FixedwingAttitudeControl.hpp
+
+		fw_pitch_controller.cpp
+		fw_roll_controller.cpp
+		fw_wheel_controller.cpp
+		fw_yaw_controller.cpp
 	DEPENDS
-		git_ecl
-		ecl_attitude_fw
+		px4_work_queue
 	)

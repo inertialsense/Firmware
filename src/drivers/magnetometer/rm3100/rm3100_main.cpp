@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2018 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2018-2021 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,324 +37,94 @@
  * Driver for the RM3100 magnetometer connected via I2C or SPI.
  */
 
-#include "rm3100_main.h"
-#include <px4_getopt.h>
+#include "rm3100.h"
+#include <px4_platform_common/getopt.h>
+#include <px4_platform_common/module.h>
 
-/**
- * Driver 'main' command.
- */
-extern "C" __EXPORT int rm3100_main(int argc, char *argv[]);
-
-int
-rm3100::info(RM3100_BUS bus_id)
+I2CSPIDriverBase *RM3100::instantiate(const I2CSPIDriverConfig &config, int runtime_instance)
 {
-	struct rm3100_bus_option &bus = find_bus(bus_id);
+	device::Device *interface = nullptr;
 
-	PX4_WARN("running on bus: %u (%s)\n", (unsigned)bus.bus_id, bus.devpath);
-	bus.dev->print_info();
-	return 1;
-}
+	if (config.bus_type == BOARD_I2C_BUS) {
+		interface = RM3100_I2C_interface(config.bus, config.bus_frequency);
 
-bool
-rm3100::init(RM3100_BUS bus_id)
-{
-	struct rm3100_bus_option &bus = find_bus(bus_id);
-	const char *path = bus.devpath;
-
-	int fd = open(path, O_RDONLY);
-
-	if (fd < 0) {
-		return false;
+	} else if (config.bus_type == BOARD_SPI_BUS) {
+		interface = RM3100_SPI_interface(config.bus, config.spi_devid, config.bus_frequency, config.spi_mode);
 	}
 
-	if (ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT) < 0) {
-		close(fd);
-		errx(1, "Failed to setup poll rate");
-		return false;
-
-	} else {
-		PX4_INFO("Poll rate set to max (146 Hz)");
+	if (interface == nullptr) {
+		PX4_ERR("alloc failed");
+		return nullptr;
 	}
-
-	close(fd);
-
-	return true;
-}
-
-bool
-rm3100::start_bus(struct rm3100_bus_option &bus, Rotation rotation)
-{
-	if (bus.dev != nullptr) {
-		errx(1, "bus option already started");
-		return false;
-	}
-
-	device::Device *interface = bus.interface_constructor(bus.busnum);
 
 	if (interface->init() != OK) {
 		delete interface;
-		warnx("no device on bus %u", (unsigned)bus.bus_id);
-
-		return false;
+		PX4_DEBUG("no device on bus %i (devid 0x%x)", config.bus, config.spi_devid);
+		return nullptr;
 	}
 
-	bus.dev = new RM3100(interface, bus.devpath, rotation);
+	RM3100 *dev = new RM3100(interface, config);
 
-	if (bus.dev != nullptr &&
-	    bus.dev->init() != OK) {
-		delete bus.dev;
-		bus.dev = NULL;
-		return false;
+	if (dev == nullptr) {
+		delete interface;
+		return nullptr;
 	}
 
-	return true;
+	if (OK != dev->init()) {
+		delete dev;
+		return nullptr;
+	}
+
+	return dev;
 }
 
-int
-rm3100::start(RM3100_BUS bus_id, Rotation rotation)
+void RM3100::print_usage()
 {
-	bool started = false;
-
-	for (unsigned i = 0; i < NUM_BUS_OPTIONS; i++) {
-		if (bus_id == RM3100_BUS_ALL && bus_options[i].dev != NULL) {
-			// this device is already started
-			continue;
-		}
-
-		if (bus_id != RM3100_BUS_ALL && bus_options[i].bus_id != bus_id) {
-			// not the one that is asked for
-			continue;
-		}
-
-		started |= start_bus(bus_options[i], rotation);
-		//init(bus_id);
-	}
-
-	return started;
+	PRINT_MODULE_USAGE_NAME("rm3100", "driver");
+	PRINT_MODULE_USAGE_SUBCATEGORY("magnetometer");
+	PRINT_MODULE_USAGE_COMMAND("start");
+	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(true, true);
+	PRINT_MODULE_USAGE_PARAM_INT('R', 0, 0, 35, "Rotation", true);
+	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
 }
 
-int
-rm3100::stop()
+extern "C" int rm3100_main(int argc, char *argv[])
 {
-	bool stopped = false;
-
-	for (unsigned i = 0; i < NUM_BUS_OPTIONS; i++) {
-		if (bus_options[i].dev != nullptr) {
-			bus_options[i].dev->stop();
-			delete bus_options[i].dev;
-			bus_options[i].dev = nullptr;
-			stopped = true;
-		}
-	}
-
-	return !stopped;
-}
-
-bool
-rm3100::test(RM3100_BUS bus_id)
-{
-	struct rm3100_bus_option &bus = find_bus(bus_id);
-	struct mag_report report;
-	ssize_t sz;
-	int ret;
-	const char *path = bus.devpath;
-
-	int fd = open(path, O_RDONLY);
-
-	if (fd < 0) {
-		PX4_WARN("%s open failed (try 'rm3100 start')", path);
-		return 1;
-	}
-
-	/* do a simple demand read */
-	sz = read(fd, &report, sizeof(report));
-
-	if (sz != sizeof(report)) {
-		PX4_WARN("immediate read failed");
-		return 1;
-	}
-
-	print_message(report);
-
-	/* check if mag is onboard or external */
-	if (ioctl(fd, MAGIOCGEXTERNAL, 0) < 0) {
-		PX4_WARN("failed to get if mag is onboard or external");
-		return 1;
-	}
-
-	/* set the queue depth to 5 */
-	if (ioctl(fd, SENSORIOCSQUEUEDEPTH, 10) != OK) {
-		PX4_WARN("failed to set queue depth");
-		return 1;
-	}
-
-	/* start the sensor polling at 2Hz */
-	if (ioctl(fd, SENSORIOCSPOLLRATE, 2) != OK) {
-		PX4_WARN("failed to set 2Hz poll rate");
-		return 1;
-	}
-
-	struct pollfd fds;
-
-	/* read the sensor 5x and report each value */
-	for (unsigned i = 0; i < 5; i++) {
-
-		/* wait for data to be ready */
-		fds.fd = fd;
-		fds.events = POLLIN;
-		ret = poll(&fds, 1, 2000);
-
-		if (ret != 1) {
-			PX4_WARN("timed out waiting for sensor data");
-			return 1;
-		}
-
-		/* now go get it */
-		sz = read(fd, &report, sizeof(report));
-
-		if (sz != sizeof(report)) {
-			PX4_WARN("periodic read failed");
-			return 1;
-		}
-
-		print_message(report);
-	}
-
-	PX4_INFO("PASS");
-	return 1;
-}
-
-bool
-rm3100::reset(RM3100_BUS bus_id)
-{
-	struct rm3100_bus_option &bus = find_bus(bus_id);
-	const char *path = bus.devpath;
-
-	int fd = open(path, O_RDONLY);
-
-	if (fd < 0) {
-		PX4_WARN("open failed ");
-		return 1;
-	}
-
-	if (ioctl(fd, SENSORIOCRESET, 0) < 0) {
-		PX4_WARN("driver reset failed");
-		return 1;
-	}
-
-	if (ioctl(fd, SENSORIOCSPOLLRATE, SENSOR_POLLRATE_DEFAULT) < 0) {
-		PX4_WARN("driver poll restart failed");
-		return 1;
-	}
-
-	return 0;
-}
-
-void
-rm3100::usage()
-{
-	PX4_WARN("missing command: try 'start', 'info', 'test', 'reset', 'info'");
-	PX4_WARN("options:");
-	PX4_WARN("    -R rotation");
-	PX4_WARN("    -X external I2C bus");
-	PX4_WARN("    -I internal I2C bus");
-	PX4_WARN("    -S external SPI bus");
-	PX4_WARN("    -s internal SPI bus");
-}
-
-int
-rm3100_main(int argc, char *argv[])
-{
-	int myoptind = 1;
+	using ThisDriver = RM3100;
 	int ch;
-	const char *myoptarg = nullptr;
+	BusCLIArguments cli{true, true};
+	cli.default_i2c_frequency = 400000;
+	cli.default_spi_frequency = 1 * 1000 * 1000;
 
-	enum RM3100_BUS bus_id = RM3100_BUS_ALL;
-	enum Rotation rotation = ROTATION_NONE;
-
-	while ((ch = px4_getopt(argc, argv, "XISR:T", &myoptind, &myoptarg)) != EOF) {
+	while ((ch = cli.getOpt(argc, argv, "R:")) != EOF) {
 		switch (ch) {
 		case 'R':
-			rotation = (enum Rotation)atoi(myoptarg);
+			cli.rotation = (enum Rotation)atoi(cli.optArg());
 			break;
-
-		case 'I':
-			bus_id = RM3100_BUS_I2C_INTERNAL;
-			break;
-
-		case 'X':
-			bus_id = RM3100_BUS_I2C_EXTERNAL;
-			break;
-
-		case 'S':
-			bus_id = RM3100_BUS_SPI_EXTERNAL;
-			break;
-
-		case 's':
-			bus_id = RM3100_BUS_SPI_INTERNAL;
-			break;
-
-		default:
-			rm3100::usage();
-			return 0;
 		}
 	}
 
-	if (myoptind >= argc) {
-		rm3100::usage();
+	const char *verb = cli.optArg();
+
+	if (!verb) {
+		ThisDriver::print_usage();
 		return -1;
 	}
 
-	const char *verb = argv[myoptind];
+	cli.i2c_address = RM3100_ADDRESS;
 
-	// Start/load the driver
+	BusInstanceIterator iterator(MODULE_NAME, cli, DRV_MAG_DEVTYPE_RM3100);
+
 	if (!strcmp(verb, "start")) {
+		return ThisDriver::module_start(cli, iterator);
 
-		if (rm3100::start(bus_id, rotation)) {
+	} else if (!strcmp(verb, "stop")) {
+		return ThisDriver::module_stop(iterator);
 
-			rm3100::init(bus_id);
-
-			return 0;
-
-		} else {
-			return 1;
-		}
+	} else if (!strcmp(verb, "status")) {
+		return ThisDriver::module_status(iterator);
 	}
 
-	// Stop the driver
-	if (!strcmp(verb, "stop")) {
-		return rm3100::stop();
-	}
-
-	// Test the driver/device
-	if (!strcmp(verb, "test")) {
-		return rm3100::test(bus_id);
-	}
-
-	// Reset the driver
-	if (!strcmp(verb, "reset")) {
-		return rm3100::reset(bus_id);
-	}
-
-	// Print driver information
-	if (!strcmp(verb, "info") ||
-	    !strcmp(verb, "status")) {
-		return rm3100::info(bus_id);
-	}
-
-	PX4_INFO("unrecognized command, try 'start', 'test', 'reset' or 'info'");
-	return 1;
-}
-
-struct
-rm3100::rm3100_bus_option &rm3100::find_bus(RM3100_BUS bus_id)
-{
-	for (unsigned i = 0; i < NUM_BUS_OPTIONS; i++) {
-		if ((bus_id == RM3100_BUS_ALL ||
-		     bus_id == bus_options[i].bus_id) && bus_options[i].dev != NULL) {
-			return bus_options[i];
-		}
-	}
-
-	errx(1, "bus %u not started", (unsigned)bus_id);
+	ThisDriver::print_usage();
+	return -1;
 }

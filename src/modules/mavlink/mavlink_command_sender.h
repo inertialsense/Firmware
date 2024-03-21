@@ -40,8 +40,8 @@
 
 #pragma once
 
-#include <px4_tasks.h>
-#include <px4_sem.h>
+#include <px4_platform_common/tasks.h>
+#include <px4_platform_common/sem.h>
 #include <drivers/drv_hrt.h>
 
 #include <uORB/topics/vehicle_command.h>
@@ -49,7 +49,6 @@
 
 #include "timestamped_list.h"
 #include "mavlink_bridge_header.h"
-#include <v2.0/mavlink_types.h>
 
 /**
  * @class MavlinkCommandSender
@@ -81,7 +80,8 @@ public:
 	 * Handle mavlink command_ack.
 	 * thread-safe
 	 */
-	void handle_mavlink_command_ack(const mavlink_command_ack_t &ack, uint8_t from_sysid, uint8_t from_compid);
+	void handle_mavlink_command_ack(const mavlink_command_ack_t &ack, uint8_t from_sysid, uint8_t from_compid,
+					uint8_t channel);
 
 private:
 	MavlinkCommandSender() = default;
@@ -101,17 +101,21 @@ private:
 	static MavlinkCommandSender *_instance;
 	static px4_sem_t _lock;
 
-	// There are MAVLINK_COMM_0 to MAVLINK_COMM_3, so it should be 4.
-	static const unsigned MAX_MAVLINK_CHANNEL = 4;
-
-	typedef struct {
+	struct command_item_s {
 		mavlink_command_long_t command = {};
 		hrt_abstime timestamp_us = 0;
 		hrt_abstime last_time_sent_us = 0;
-		int8_t num_sent_per_channel[MAX_MAVLINK_CHANNEL] = {-1, -1, -1, -1};
-	} command_item_t;
+		// -1: channel did not request this command to be sent, -2: channel got an ack for this command
+#if MAVLINK_COMM_NUM_BUFFERS == 4
+		int8_t num_sent_per_channel[MAVLINK_COMM_NUM_BUFFERS] {-1, -1, -1, -1};
+#elif MAVLINK_COMM_NUM_BUFFERS == 6
+		int8_t num_sent_per_channel[MAVLINK_COMM_NUM_BUFFERS] {-1, -1, -1, -1, -1, -1};
+#else
+# error Unknown number of MAVLINK_COMM_NUM_BUFFERS
+#endif
+	};
 
-	TimestampedList<command_item_t> _commands{3};
+	TimestampedList<command_item_s, 3> _commands{};
 
 	bool _debug_enabled = false;
 	static constexpr uint8_t RETRIES = 3;

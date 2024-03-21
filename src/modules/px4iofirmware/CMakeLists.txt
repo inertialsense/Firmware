@@ -31,25 +31,31 @@
 #
 ############################################################################
 
+option(PX4IO_PERF "Enable px4io perf counters" OFF)
+
 add_library(px4iofirmware
-	hx_stream.c
-	adc.c
-	controls.c
+	adc.cpp
+	controls.cpp
 	mixer.cpp
-	px4io.c
+	px4io.cpp
 	registers.c
-	safety.c
-	serial.c
-	)
+	safety_button.cpp
+	serial.cpp
+)
 
 set_property(GLOBAL APPEND PROPERTY PX4_MODULE_LIBRARIES px4iofirmware)
 target_link_libraries(px4iofirmware
 	PUBLIC
+		arch_io_pins
+		arch_watchdog_iwdg
 		nuttx_apps
 		nuttx_arch
 		nuttx_c
-		mixer
+		nuttx_mm
 		rc
-		perf
-		pwm_limit
 )
+
+if(PX4IO_PERF)
+	target_compile_definitions(px4iofirmware PRIVATE PX4IO_PERF)
+	target_link_libraries(px4iofirmware PRIVATE perf)
+endif()

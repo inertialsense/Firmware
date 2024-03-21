@@ -39,11 +39,15 @@
 #include <dirent.h>
 #include <queue.h>
 
-#include <px4_defines.h>
+#include <px4_platform_common/defines.h>
 #include <systemlib/err.h>
 #include <drivers/drv_hrt.h>
 
+#ifndef MAVLINK_FTP_UNIT_TEST
 #include "mavlink_bridge_header.h"
+#else
+#include <mavlink.h>
+#endif
 
 class MavlinkFtpTest;
 class Mavlink;
@@ -59,7 +63,7 @@ public:
 	 * Handle sending of messages. Call this regularly at a fixed frequency.
 	 * @param t current time
 	 */
-	void send(const hrt_abstime t);
+	void send();
 
 	/// Handle possible FTP message
 	void handle_message(const mavlink_message_t *msg);
@@ -119,8 +123,9 @@ public:
 		kErrNoSessionsAvailable,	///< All available Sessions in use
 		kErrEOF,			///< Offset past end of file for List and Read commands
 		kErrUnknownCommand,		///< Unknown command opcode
-		kErrFailFileExists,		///< File exists already
-		kErrFailFileProtected		///< File is write protected
+		kErrFailFileExists,		///< File/directory exists already
+		kErrFailFileProtected,		///< File/directory is write protected
+		kErrFileNotFound                ///< File/directory not found
 	};
 
 	unsigned get_size();
@@ -128,14 +133,14 @@ public:
 private:
 	char		*_data_as_cstring(PayloadHeader *payload);
 
-	void		_process_request(mavlink_file_transfer_protocol_t *ftp_req, uint8_t target_system_id);
+	void		_process_request(mavlink_file_transfer_protocol_t *ftp_req, uint8_t target_system_id, uint8_t target_comp_id);
 	void		_reply(mavlink_file_transfer_protocol_t *ftp_req);
 	int		_copy_file(const char *src_path, const char *dst_path, size_t length);
 
-	ErrorCode	_workList(PayloadHeader *payload, bool list_hidden = false);
+	ErrorCode	_workList(PayloadHeader *payload);
 	ErrorCode	_workOpen(PayloadHeader *payload, int oflag);
 	ErrorCode	_workRead(PayloadHeader *payload);
-	ErrorCode	_workBurst(PayloadHeader *payload, uint8_t target_system_id);
+	ErrorCode	_workBurst(PayloadHeader *payload, uint8_t target_system_id, uint8_t target_component_id);
 	ErrorCode	_workWrite(PayloadHeader *payload);
 	ErrorCode	_workTerminate(PayloadHeader *payload);
 	ErrorCode	_workReset(PayloadHeader *payload);
@@ -149,6 +154,8 @@ private:
 	uint8_t _getServerSystemId(void);
 	uint8_t _getServerComponentId(void);
 	uint8_t _getServerChannel(void);
+
+	bool _validatePathIsWritable(const char *path);
 
 	/**
 	 * make sure that the working buffers _work_buffer* are allocated
@@ -170,6 +177,7 @@ private:
 		uint32_t	stream_offset;
 		uint16_t	stream_seq_number;
 		uint8_t		stream_target_system_id;
+		uint8_t         stream_target_component_id;
 		unsigned	stream_chunk_transmitted;
 	};
 	struct SessionInfo _session_info {};	///< Session info, fd=-1 for no active session
@@ -205,4 +213,6 @@ private:
 
 	// Mavlink test needs to be able to call send
 	friend class MavlinkFtpTest;
+
+	int _our_errno {0};
 };

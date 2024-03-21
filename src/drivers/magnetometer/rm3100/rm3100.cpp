@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2018 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2018-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,84 +41,44 @@
 
 #include "rm3100.h"
 
-RM3100::RM3100(device::Device *interface, const char *path, enum Rotation rotation) :
-	CDev("RM3100", path),
-	_interface(interface),
-	_work{},
-	_reports(nullptr),
-	_scale{},
-	_last_report{},
-	_mag_topic(nullptr),
-	_comms_errors(perf_alloc(PC_COUNT, "rm3100_comms_errors")),
-	_conf_errors(perf_alloc(PC_COUNT, "rm3100_conf_errors")),
-	_range_errors(perf_alloc(PC_COUNT, "rm3100_range_errors")),
-	_sample_perf(perf_alloc(PC_ELAPSED, "rm3100_read")),
-	_calibrated(false),
-	_continuous_mode_set(false),
-	_mode(SINGLE),
-	_rotation(rotation),
-	_measure_ticks(0),
-	_class_instance(-1),
-	_orb_class_instance(-1),
-	_range_scale(1.0f / (RM3100_SENSITIVITY * UTESLA_TO_GAUSS)),
-	_check_state_cnt(0)
+RM3100::RM3100(device::Device *interface, const I2CSPIDriverConfig &config) :
+	I2CSPIDriver(config),
+	_px4_mag(interface->get_device_id(), config.rotation),
+	_interface(interface)
 {
-	// set the device type from the interface
-	_device_id.devid_s.bus_type = _interface->get_device_bus_type();
-	_device_id.devid_s.bus = _interface->get_device_bus();
-	_device_id.devid_s.address = _interface->get_device_address();
-	_device_id.devid_s.devtype = DRV_MAG_DEVTYPE_RM3100;
-
-	// enable debug() calls
-	_debug_enabled = false;
-
-	// default scaling
-	_scale.x_offset = 0;
-	_scale.x_scale = 1.0f;
-	_scale.y_offset = 0;
-	_scale.y_scale = 1.0f;
-	_scale.z_offset = 0;
-	_scale.z_scale = 1.0f;
-
-	// work_cancel in the dtor will explode if we don't do this...
-	memset(&_work, 0, sizeof(_work));
+	_px4_mag.set_scale(1.f / (RM3100_SENSITIVITY * UTESLA_TO_GAUSS));
 }
 
 RM3100::~RM3100()
 {
-	/* make sure we are truly inactive */
-	stop();
-
-	if (_reports != nullptr) {
-		delete _reports;
-	}
-
-	if (_class_instance != -1) {
-		unregister_class_devname(MAG_BASE_DEVICE_PATH, _class_instance);
-	}
-
 	// free perf counters
-	perf_free(_sample_perf);
-	perf_free(_comms_errors);
-	perf_free(_range_errors);
-	perf_free(_conf_errors);
+	perf_free(_reset_perf);
+	perf_free(_range_error_perf);
+	perf_free(_bad_transfer_perf);
+
+	delete _interface;
 }
 
-int
-RM3100::self_test()
+int RM3100::self_test()
 {
-	/* Stop current measurements */
-	stop();
+	bool complete = false;
 
-	/* Chances are that a poll event was triggered, so wait for conversion and read registers in order to clear DRDY bit */
-	usleep(RM3100_CONVERSION_INTERVAL);
-	collect();
+	// Set the default command mode and enable polling (not continuous mode)
+	uint8_t cmd = (CMM_DEFAULT & ~CONTINUOUS_MODE);
+	int ret = _interface->write(ADDR_CMM, &cmd, 1);
 
-	/* Fail if calibration is not good */
-	int ret = 0;
-	uint8_t cmd = 0;
+	if (ret != PX4_OK) {
+		return ret;
+	}
 
-	/* Configure mag into self test mode */
+	cmd = HSHAKE_NO_DRDY_CLEAR;
+	ret = _interface->write(ADDR_HSHAKE, &cmd, 1);
+
+	if (ret != PX4_OK) {
+		return ret;
+	}
+
+	// Configure sensor to execute BIST upon receipt of a POLL command
 	cmd = BIST_SELFTEST;
 	ret = _interface->write(ADDR_BIST, &cmd, 1);
 
@@ -126,7 +86,7 @@ RM3100::self_test()
 		return ret;
 	}
 
-	/* Now we need to write to POLL to launch self test */
+	// Poll to start the self test
 	cmd = POLL_XYZ;
 	ret = _interface->write(ADDR_POLL, &cmd, 1);
 
@@ -134,157 +94,130 @@ RM3100::self_test()
 		return ret;
 	}
 
-	/* Now wait for status register */
-	usleep(RM3100_CONVERSION_INTERVAL);
+	// Perform test procedure until a valid result is obtained or test times out
 
-	if (check_measurement() != PX4_OK) {
-		return -1;;
+	const hrt_abstime t_start = hrt_absolute_time();
+
+	while ((hrt_absolute_time() - t_start) < BIST_DUR_USEC) {
+
+		uint8_t status = 0;
+		ret = _interface->read(ADDR_STATUS, &status, 1);
+
+		if (ret != PX4_OK) {
+			return ret;
+		}
+
+		// If the DRDY bit in the status register is set, BIST should be complete
+		if (status & STATUS_DRDY) {
+			// Check BIST register to evaluate the test result
+			ret = _interface->read(ADDR_BIST, &cmd, 1);
+
+			if (ret != PX4_OK) {
+				return ret;
+			}
+
+			// The test results are not valid if STE is not set. In this case, we try again
+			if (cmd & BIST_STE) {
+				complete = true;
+
+				// If the x, y, or z LR oscillators malfunctioned then the self test failed.
+				if ((cmd & BIST_XYZ_OK) ^ BIST_XYZ_OK) {
+					PX4_ERR("built-in self test failed: 0x%2X x:%s y:%s z:%s", cmd,
+						cmd & 0x10 ? "Pass" : "Fail",
+						cmd & 0x20 ? "Pass" : "Fail",
+						cmd & 0x40 ? "Pass" : "Fail");
+					return PX4_ERROR;
+
+				} else {
+					// The test passed, disable self-test mode by clearing the STE bit
+					cmd = 0;
+					ret = _interface->write(ADDR_BIST, &cmd, 1);
+
+					if (ret != PX4_OK) {
+						PX4_ERR("Failed to disable built-in self test");
+					}
+
+					return PX4_OK;
+				}
+			}
+		}
 	}
 
-	/* Now check BIST register to see whether self test is ok or not*/
-	ret = _interface->read(ADDR_BIST, &cmd, 1);
-
-	if (ret != PX4_OK) {
-		return ret;
+	if (!complete) {
+		PX4_ERR("built-in self test incomplete");
 	}
 
-	ret = !((cmd & BIST_XYZ_OK) == BIST_XYZ_OK);
-
-	/* Restart measurement state machine */
-	start();
-
-	return ret;
+	return PX4_ERROR;
 }
 
-int
-RM3100::check_measurement()
+void RM3100::RunImpl()
 {
-	uint8_t status = 0;
-	int ret = -1;
-
-	ret = _interface->read(ADDR_STATUS, &status, 1);
-
-	if (ret != 0) {
-		return ret;
+	// full reset if things are failing consistently
+	if (_failure_count > 10) {
+		_failure_count = 0;
+		set_default_register_values();
+		ScheduleOnInterval(RM3100_INTERVAL);
+		return;
 	}
 
-	return !((status & STATUS_DRDY) == STATUS_DRDY) ;
-}
-
-int
-RM3100::collect()
-{
-	/* Check whether a measurement is available or not, otherwise return immediately */
-	if (check_measurement() != 0) {
-		DEVICE_DEBUG("No measurement available");
-		return 0;
-	}
-
-#pragma pack(push, 1)
 	struct {
 		uint8_t x[3];
 		uint8_t y[3];
 		uint8_t z[3];
-	}       rm_report;
-#pragma pack(pop)
+	} rm_report{};
 
-	int     ret = 0;
-
-	int32_t xraw;
-	int32_t yraw;
-	int32_t zraw;
-
-	float xraw_f;
-	float yraw_f;
-	float zraw_f;
-
-	struct mag_report new_mag_report;
-	bool sensor_is_onboard = false;
-
-	perf_begin(_sample_perf);
-
-	new_mag_report.timestamp = hrt_absolute_time();
-	new_mag_report.error_count = perf_event_count(_comms_errors);
-	new_mag_report.scaling = _range_scale;
-	new_mag_report.device_id = _device_id.devid;
-
-	ret = _interface->read(ADDR_MX, (uint8_t *)&rm_report, sizeof(rm_report));
+	const hrt_abstime timestamp_sample = hrt_absolute_time();
+	int ret = _interface->read(ADDR_MX, (uint8_t *)&rm_report, sizeof(rm_report));
 
 	if (ret != OK) {
-		perf_count(_comms_errors);
-		PX4_WARN("Register read error.");
-		return ret;
+		perf_count(_bad_transfer_perf);
+		_failure_count++;
+		return;
 	}
 
 	/* Rearrange mag data */
-	xraw = ((rm_report.x[0] << 16) | (rm_report.x[1] << 8) | rm_report.x[2]);
-	yraw = ((rm_report.y[0] << 16) | (rm_report.y[1] << 8) | rm_report.y[2]);
-	zraw = ((rm_report.z[0] << 16) | (rm_report.z[1] << 8) | rm_report.z[2]);
+	int32_t xraw = ((rm_report.x[0] << 16) | (rm_report.x[1] << 8) | rm_report.x[2]);
+	int32_t yraw = ((rm_report.y[0] << 16) | (rm_report.y[1] << 8) | rm_report.y[2]);
+	int32_t zraw = ((rm_report.z[0] << 16) | (rm_report.z[1] << 8) | rm_report.z[2]);
 
 	/* Convert 24 bit signed values to 32 bit signed values */
 	convert_signed(&xraw);
 	convert_signed(&yraw);
 	convert_signed(&zraw);
 
-	/* There is no temperature sensor */
-	new_mag_report.temperature = 0.0f;
+	// valid range: -8388608 to 8388607
+	if (xraw < -8388608 || xraw > 8388607 ||
+	    yraw < -8388608 || yraw > 8388607 ||
+	    zraw < -8388608 || zraw > 8388607) {
 
-	// XXX revisit for SPI part, might require a bus type IOCTL
-	unsigned dummy = 0;
-	sensor_is_onboard = !_interface->ioctl(MAGIOCGEXTERNAL, dummy);
-	new_mag_report.is_external = !sensor_is_onboard;
+		_failure_count++;
 
-	/**
-	 * RAW outputs
-	 * As we only have 16 bits to store raw data, the following values are not correct
-	 */
-	new_mag_report.x_raw = (int16_t)(xraw >> 8);
-	new_mag_report.y_raw = (int16_t)(yraw >> 8);
-	new_mag_report.z_raw = (int16_t)(zraw >> 8);
-
-	xraw_f = xraw;
-	yraw_f = yraw;
-	zraw_f = zraw;
-
-	/* apply user specified rotation */
-	rotate_3f(_rotation, xraw_f, yraw_f, zraw_f);
-
-	new_mag_report.x = ((xraw_f * _range_scale) - _scale.x_offset) * _scale.x_scale;
-	new_mag_report.y = ((yraw_f * _range_scale) - _scale.y_offset) * _scale.y_scale;
-	new_mag_report.z = ((zraw_f * _range_scale) - _scale.z_offset) * _scale.z_scale;
-
-	if (!(_pub_blocked)) {
-
-		if (_mag_topic != nullptr) {
-			/* publish it */
-			orb_publish(ORB_ID(sensor_mag), _mag_topic, &new_mag_report);
-
-		} else {
-			_mag_topic = orb_advertise_multi(ORB_ID(sensor_mag), &new_mag_report,
-							 &_orb_class_instance, (sensor_is_onboard) ? ORB_PRIO_HIGH : ORB_PRIO_MAX);
-
-			if (_mag_topic == nullptr) {
-				DEVICE_DEBUG("ADVERT FAIL");
-			}
-		}
+		perf_count(_range_error_perf);
+		return;
 	}
 
-	_last_report = new_mag_report;
+	// only publish changes
+	if (_raw_data_prev[0] != xraw || _raw_data_prev[1] != yraw || _raw_data_prev[2] != zraw) {
 
-	/* post a report to the ring */
-	_reports->force(&new_mag_report);
+		_px4_mag.set_error_count(perf_event_count(_bad_transfer_perf)
+					 + perf_event_count(_range_error_perf));
 
-	/* notify anyone waiting for data */
-	poll_notify(POLLIN);
+		_px4_mag.update(timestamp_sample, xraw, yraw, zraw);
 
-	ret = OK;
+		_raw_data_prev[0] = xraw;
+		_raw_data_prev[1] = yraw;
+		_raw_data_prev[2] = zraw;
 
-	perf_end(_sample_perf);
-	return ret;
+		if (_failure_count > 0) {
+			_failure_count--;
+		}
+
+	} else {
+		_failure_count++;
+	}
 }
 
-void
-RM3100::convert_signed(int32_t *n)
+void RM3100::convert_signed(int32_t *n)
 {
 	/* Sensor returns values as 24 bit signed values, so we need to manually convert to 32 bit signed values */
 	if ((*n & (1 << 23)) == (1 << 23)) {
@@ -292,326 +225,34 @@ RM3100::convert_signed(int32_t *n)
 	}
 }
 
-void
-RM3100::cycle()
+int RM3100::init()
 {
-	/* _measure_ticks == 0  is used as _task_should_exit */
-	if (_measure_ticks == 0) {
-		return;
-	}
-
-	/* Collect last measurement at the start of every cycle */
-	if (collect() != OK) {
-		DEVICE_DEBUG("collection error");
-		/* restart the measurement state machine */
-		start();
-		return;
-	}
-
-
-	if (measure() != OK) {
-		DEVICE_DEBUG("measure error");
-	}
-
-	if (_measure_ticks > 0) {
-		/* schedule a fresh cycle call when the measurement is done */
-		work_queue(HPWORK,
-			   &_work,
-			   (worker_t)&RM3100::cycle_trampoline,
-			   this,
-			   _measure_ticks);
-	}
-}
-
-void
-RM3100::cycle_trampoline(void *arg)
-{
-	RM3100 *dev = (RM3100 *)arg;
-
-	dev->cycle();
-}
-
-int
-RM3100::init()
-{
-	int ret = PX4_ERROR;
-
-	ret = CDev::init();
-
-	if (ret != OK) {
-		DEVICE_DEBUG("CDev init failed");
-		return ret;
-	}
-
-	/* allocate basic report buffers */
-	_reports = new ringbuffer::RingBuffer(2, sizeof(mag_report));
-
-	if (_reports == nullptr) {
-		return PX4_ERROR;
-	}
-
-	/* reset the device configuration */
-	reset();
-
-	_class_instance = register_class_devname(MAG_BASE_DEVICE_PATH);
-
-	ret = self_test();
+	int ret = self_test();
 
 	if (ret != PX4_OK) {
 		PX4_ERR("self test failed");
 	}
 
-	return ret;
-}
-
-int
-RM3100::ioctl(struct file *file_pointer, int cmd, unsigned long arg)
-{
-	unsigned dummy = 0;
-
-	switch (cmd) {
-	case SENSORIOCSPOLLRATE: {
-			switch (arg) {
-
-			/* switching to manual polling */
-			case SENSOR_POLLRATE_MANUAL:
-				stop();
-				_measure_ticks = 0;
-				return PX4_OK;
-
-			/* zero would be bad */
-			case 0:
-				return -EINVAL;
-
-			case SENSOR_POLLRATE_DEFAULT: {
-					/* do we need to start internal polling? */
-					bool not_started = (_measure_ticks == 0);
-
-					/* set interval for next measurement to minimum legal value */
-					_measure_ticks = USEC2TICK(RM3100_CONVERSION_INTERVAL);
-
-					/* if we need to start the poll state machine, do it */
-					if (not_started) {
-						start();
-					}
-
-					return PX4_OK;
-				}
-
-			/* Uses arg (hz) for a custom poll rate */
-			default: {
-					/* do we need to start internal polling? */
-					bool not_started = (_measure_ticks == 0);
-
-					/* convert hz to tick interval via microseconds */
-					unsigned ticks = USEC2TICK(1000000 / arg);
-
-					/* check against maximum rate */
-					if (ticks < USEC2TICK(RM3100_CONVERSION_INTERVAL)) {
-						return -EINVAL;
-					}
-
-					/* update interval for next measurement */
-					_measure_ticks = ticks;
-
-					/* if we need to start the poll state machine, do it */
-					if (not_started) {
-						start();
-					}
-
-					return PX4_OK;
-				}
-			}
-		}
-
-	case SENSORIOCSQUEUEDEPTH: {
-			/* lower bound is mandatory, upper bound is a sanity check */
-			if ((arg < 1) || (arg > 100)) {
-				return -EINVAL;
-			}
-
-			irqstate_t flags = px4_enter_critical_section();
-
-			if (!_reports->resize(arg)) {
-				px4_leave_critical_section(flags);
-				return -ENOMEM;
-			}
-
-			px4_leave_critical_section(flags);
-
-			return PX4_OK;
-		}
-
-	case SENSORIOCRESET:
-		return reset();
-
-	case MAGIOCSSAMPLERATE:
-		/* same as pollrate because device is in single measurement mode*/
-		return ioctl(file_pointer, SENSORIOCSPOLLRATE, arg);
-
-	case MAGIOCGSAMPLERATE:
-		/* same as pollrate because device is in single measurement mode*/
-		return 1000000 / TICK2USEC(_measure_ticks);
-
-	case MAGIOCSRANGE:
-		/* field measurement range cannot be configured for this sensor (8 Gauss) */
-		return OK;
-
-	case MAGIOCGRANGE:
-		/* field measurement range cannot be configured for this sensor (8 Gauss) */
-		return 8;
-
-	case MAGIOCSSCALE:
-		/* set new scale factors */
-		memcpy(&_scale, (struct mag_calibration_s *)arg, sizeof(_scale));
-		return 0;
-
-	case MAGIOCGSCALE:
-		/* copy out scale factors */
-		memcpy((struct mag_calibration_s *)arg, &_scale, sizeof(_scale));
-		return 0;
-
-
-	case MAGIOCCALIBRATE:
-		/* This is left for compatibility with the IOCTL call in mag calibration */
-		return OK;
-
-	case MAGIOCGEXTERNAL:
-		DEVICE_DEBUG("MAGIOCGEXTERNAL in main driver");
-		return _interface->ioctl(cmd, dummy);
-
-	case DEVIOCGDEVICEID:
-		return _interface->ioctl(cmd, dummy);
-
-	default:
-		/* give it to the superclass */
-		return CDev::ioctl(file_pointer, cmd, arg);
-	}
-}
-
-int
-RM3100::measure()
-{
-	int ret = 0;
-	uint8_t cmd = 0;
-
-	/* Send the command to begin a measurement. */
-	if ((_mode == CONTINUOUS) && !_continuous_mode_set) {
-		cmd = (CMM_DEFAULT | CONTINUOUS_MODE);
-		ret = _interface->write(ADDR_CMM, &cmd, 1);
-		_continuous_mode_set = true;
-
-	} else if (_mode == SINGLE) {
-		if (_continuous_mode_set) {
-			/* This is needed for polling mode */
-			cmd = (CMM_DEFAULT | POLLING_MODE);
-			ret = _interface->write(ADDR_CMM, &cmd, 1);
-
-			if (ret != OK) {
-				perf_count(_comms_errors);
-				return ret;
-			}
-
-			_continuous_mode_set = false;
-		}
-
-		cmd = POLL_XYZ;
-		ret = _interface->write(ADDR_POLL, &cmd, 1);
+	if (set_default_register_values() == PX4_OK) {
+		ScheduleOnInterval(RM3100_INTERVAL);
+		return PX4_OK;
 	}
 
-
-	if (ret != OK) {
-		perf_count(_comms_errors);
-	}
-
-	return ret;
+	return PX4_ERROR;
 }
 
-void
-RM3100::print_info()
+void RM3100::print_status()
 {
-	perf_print_counter(_sample_perf);
-	perf_print_counter(_comms_errors);
-	PX4_INFO("poll interval:  %u ticks", _measure_ticks);
-	print_message(_last_report);
-	_reports->print_info("report queue");
+	I2CSPIDriverBase::print_status();
+	perf_print_counter(_reset_perf);
+	perf_print_counter(_range_error_perf);
+	perf_print_counter(_bad_transfer_perf);
 }
 
-int
-RM3100::reset()
+int RM3100::set_default_register_values()
 {
-	int ret = 0;
+	perf_count(_reset_perf);
 
-	ret = set_default_register_values();
-
-	if (ret != OK) {
-		return PX4_ERROR;
-	}
-
-	return PX4_OK;
-}
-
-int
-RM3100::read(struct file *file_pointer, char *buffer, size_t buffer_len)
-{
-	unsigned count = buffer_len / sizeof(struct mag_report);
-	struct mag_report *mag_buf = reinterpret_cast<struct mag_report *>(buffer);
-	int ret = 0;
-
-	/* buffer must be large enough */
-	if (count < 1) {
-		return -ENOSPC;
-	}
-
-	/* if automatic measurement is enabled */
-	if (_measure_ticks > 0) {
-		/*
-		 * While there is space in the caller's buffer, and reports, copy them.
-		 * Note that we may be pre-empted by the workq thread while we are doing this;
-		 * we are careful to avoid racing with them.
-		 */
-		while (count--) {
-			if (_reports->get(mag_buf)) {
-				ret += sizeof(struct mag_report);
-				mag_buf++;
-			}
-		}
-
-		/* if there was no data, warn the caller */
-		return ret ? ret : -EAGAIN;
-	}
-
-	/* manual measurement - run one conversion */
-	/* XXX really it'd be nice to lock against other readers here */
-	do {
-		_reports->flush();
-
-		/* trigger a measurement */
-		if (measure() != OK) {
-			ret = -EIO;
-			break;
-		}
-
-		/* wait for it to complete */
-		usleep(RM3100_CONVERSION_INTERVAL);
-
-		/* run the collection phase */
-		if (collect() != OK) {
-			ret = -EIO;
-			break;
-		}
-
-		if (_reports->get(mag_buf)) {
-			ret = sizeof(struct mag_report);
-		}
-	} while (0);
-
-	return ret;
-}
-
-int
-RM3100::set_default_register_values()
-{
 	uint8_t cmd[2] = {0, 0};
 
 	cmd[0] = CCX_DEFAULT_MSB;
@@ -626,6 +267,9 @@ RM3100::set_default_register_values()
 	cmd[1] = CCZ_DEFAULT_LSB;
 	_interface->write(ADDR_CCZ, cmd, 2);
 
+	cmd[0] = HSHAKE_DEFAULT;
+	_interface->write(ADDR_HSHAKE, cmd, 1);
+
 	cmd[0] = CMM_DEFAULT;
 	_interface->write(ADDR_CMM, cmd, 1);
 
@@ -636,27 +280,4 @@ RM3100::set_default_register_values()
 	_interface->write(ADDR_BIST, cmd, 1);
 
 	return PX4_OK;
-}
-
-void
-RM3100::start()
-{
-	/* reset the report ring and state machine */
-	_reports->flush();
-
-	set_default_register_values();
-	_measure_ticks = USEC2TICK(RM3100_CONVERSION_INTERVAL);
-
-	/* schedule a cycle to start things */
-	work_queue(HPWORK, &_work, (worker_t)&RM3100::cycle_trampoline, this, 1);
-}
-
-void
-RM3100::stop()
-{
-	if (_measure_ticks > 0) {
-		/* ensure no new items are queued while we cancel this one */
-		_measure_ticks = 0;
-		work_cancel(HPWORK, &_work);
-	}
 }

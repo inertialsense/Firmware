@@ -38,24 +38,46 @@
 
 #include "led.h"
 
-int LedController::init(int led_control_sub)
-{
-	_led_control_sub = led_control_sub;
-	_last_update_call = hrt_absolute_time();
-	return 0;
-}
-
 int LedController::update(LedControlData &control_data)
 {
-	bool updated = false;
+	bool had_changes = false; // did one of the outputs change?
 
-	orb_check(_led_control_sub, &updated);
+	// check for parameter updates
+	if (_parameter_update_sub.updated()) {
+		// clear update
+		parameter_update_s pupdate;
+		_parameter_update_sub.copy(&pupdate);
 
-	while (updated || _force_update) {
+		updateParams();
+
+		const uint8_t max_brightness_prev = _max_brightness;
+
+		// set maximum brightness (0-255) from percentage
+		_max_brightness = roundf(math::constrain(_param_sys_rgb_maxbrt.get(), 0.f, 1.f) * UINT8_MAX);
+
+		// update existing
+		for (int i = 0; i < BOARD_MAX_LEDS; ++i) {
+			control_data.leds[i].brightness = math::min(_max_brightness, control_data.leds[i].brightness);
+		}
+
+		if (_max_brightness != max_brightness_prev) {
+			had_changes = true;
+		}
+	}
+
+	while (_led_control_sub.updated() || _force_update) {
+		const unsigned last_generation = _led_control_sub.get_last_generation();
+
 		// handle new state
 		led_control_s led_control;
 
-		if (orb_copy(ORB_ID(led_control), _led_control_sub, &led_control) == 0) {
+		if (_led_control_sub.copy(&led_control)) {
+
+			if ((_led_control_sub.get_last_generation() != last_generation + 1)
+			    && (_led_control_sub.get_last_generation() != last_generation)) {
+				perf_count(_led_control_sub_lost_perf);
+				PX4_DEBUG("led_control lost, generation %d -> %d", last_generation, _led_control_sub.get_last_generation());
+			}
 
 			// don't apply the new state just yet to avoid interrupting an ongoing blinking state
 			for (int i = 0; i < BOARD_MAX_LEDS; ++i) {
@@ -80,14 +102,16 @@ int LedController::update(LedControlData &control_data)
 		}
 
 		_force_update = false;
-
-		orb_check(_led_control_sub, &updated);
 	}
-
-	bool had_changes = false; // did one of the outputs change?
 
 	// handle state updates
 	hrt_abstime now = hrt_absolute_time();
+
+	if (_last_update_call == 0) {
+		_last_update_call = now;
+		return 0;
+	}
+
 	uint16_t blink_delta_t = (uint16_t)((now - _last_update_call) / 100); // Note: this is in 0.1ms
 	constexpr uint16_t breathe_duration = BREATHE_INTERVAL * BREATHE_STEPS / 100;
 
@@ -207,7 +231,7 @@ void LedController::get_control_data(LedControlData &control_data)
 
 	for (int i = 0; i < BOARD_MAX_LEDS; ++i) {
 		control_data.leds[i].color = led_control_s::COLOR_OFF; // set output to a defined state
-		control_data.leds[i].brightness = 255;
+		control_data.leds[i].brightness = _max_brightness;
 
 		for (int priority = led_control_s::MAX_PRIORITY; priority >= 0; --priority) {
 			bool flash_output_active = true;
@@ -226,7 +250,7 @@ void LedController::get_control_data(LedControlData &control_data)
 					// fade on and off
 					int counter = _states[i].current_blinking_time / (BREATHE_INTERVAL / 100);
 					int n = counter >= (BREATHE_STEPS / 2) ? BREATHE_STEPS - counter : counter;
-					control_data.leds[i].brightness = (n * n) * 255 / (BREATHE_STEPS * BREATHE_STEPS / 4); // (n/(steps/2))^2
+					control_data.leds[i].brightness = (n * n) * _max_brightness / (BREATHE_STEPS * BREATHE_STEPS / 4); // (n/(steps/2))^2
 					control_data.leds[i].color = cur_data.color;
 					_breathe_enabled = true;
 					break;

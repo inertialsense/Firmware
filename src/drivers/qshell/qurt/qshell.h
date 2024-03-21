@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2016 PX4 Development Team. All rights reserved.
+ * Copyright (C) 2022 ModalAI, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,19 +31,15 @@
  *
  ****************************************************************************/
 
-/**
- * @file qshell.h
- * Listener for shell commands from posix
- *
- * @author Nicolas de Palezieux <ndepal@gmail.com>
- */
-
 #pragma once
 
-#include <px4_app.h>
+#include <px4_platform_common/app.h>
 #include <string>
 #include <vector>
-#include "uORB/topics/qshell_req.h"
+#include <uORB/Publication.hpp>
+#include <uORB/topics/qshell_retval.h>
+#include <uORB/topics/qshell_req.h>
+
 #include "apps.h"
 
 class QShell
@@ -59,7 +55,9 @@ public:
 
 private:
 
-	struct qshell_req_s m_qshell_req;
-	apps_map_type m_apps;
+	uORB::Publication<qshell_retval_s>	_qshell_retval_pub{ORB_ID(qshell_retval)};
 
+	qshell_req_s m_qshell_req{};
+
+	apps_map_type m_apps;
 };

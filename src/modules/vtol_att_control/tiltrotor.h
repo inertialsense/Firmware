@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2015 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2015-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,42 +44,27 @@
 #include <parameters/param.h>
 #include <drivers/drv_hrt.h>
 
+#include <uORB/Publication.hpp>
+#include <uORB/topics/tiltrotor_extra_controls.h>
+
 class Tiltrotor : public VtolType
 {
 
 public:
 
 	Tiltrotor(VtolAttitudeControl *_att_controller);
-	~Tiltrotor() = default;
+	~Tiltrotor() override = default;
 
-	virtual void update_vtol_state();
-	virtual void update_transition_state();
-	virtual void fill_actuator_outputs();
-	virtual void update_mc_state();
-	virtual void update_fw_state();
-	virtual void waiting_on_tecs();
+	void update_vtol_state() override;
+	void update_transition_state() override;
+	void fill_actuator_outputs() override;
+	void update_mc_state() override;
+	void update_fw_state() override;
+	void waiting_on_tecs() override;
+	void blendThrottleAfterFrontTransition(float scale) override;
 
 private:
-
-	struct {
-		float tilt_mc;					/**< actuator value corresponding to mc tilt */
-		float tilt_transition;			/**< actuator value corresponding to transition tilt (e.g 45 degrees) */
-		float tilt_fw;					/**< actuator value corresponding to fw tilt */
-		float front_trans_dur_p2;
-		int32_t diff_thrust;
-		float diff_thrust_scale;
-	} _params_tiltrotor;
-
-	struct {
-		param_t tilt_mc;
-		param_t tilt_transition;
-		param_t tilt_fw;
-		param_t front_trans_dur_p2;
-		param_t diff_thrust;
-		param_t diff_thrust_scale;
-	} _params_handles_tiltrotor;
-
-	enum vtol_mode {
+	enum class vtol_mode {
 		MC_MODE = 0,			/**< vtol is in multicopter mode */
 		TRANSITION_FRONT_P1,	/**< vtol is in front transition part 1 mode */
 		TRANSITION_FRONT_P2,	/**< vtol is in front transition part 2 mode */
@@ -93,18 +78,27 @@ private:
 	 * they need to idle otherwise they need too much time to spin up for mc mode.
 	 */
 
+	vtol_mode _vtol_mode{vtol_mode::MC_MODE};			/**< vtol flight mode, defined by enum vtol_mode */
 
-	struct {
-		vtol_mode flight_mode;			/**< vtol flight mode, defined by enum vtol_mode */
-		hrt_abstime transition_start;	/**< absoulte time at which front transition started */
-	} _vtol_schedule;
+	uORB::Publication<tiltrotor_extra_controls_s>	_tiltrotor_extra_controls_pub{ORB_ID(tiltrotor_extra_controls)};
 
-	float _tilt_control;		/**< actuator value for the tilt servo */
+	float _tilt_control{0.0f};		/**< actuator value for the tilt servo */
 
-	/**
-	 * Update parameters.
-	 */
-	virtual void parameters_update();
+	void parameters_update() override;
+	float timeUntilMotorsAreUp();
+	float moveLinear(float start, float stop, float progress);
+
+	void blendThrottleDuringBacktransition(const float scale, const float target_throttle);
+	bool isFrontTransitionCompletedBase() override;
+
+
+	DEFINE_PARAMETERS_CUSTOM_PARENT(VtolType,
+					(ParamFloat<px4::params::VT_TILT_MC>) _param_vt_tilt_mc,
+					(ParamFloat<px4::params::VT_TILT_TRANS>) _param_vt_tilt_trans,
+					(ParamFloat<px4::params::VT_TILT_FW>) _param_vt_tilt_fw,
+					(ParamFloat<px4::params::VT_TRANS_P2_DUR>) _param_vt_trans_p2_dur,
+					(ParamFloat<px4::params::VT_BT_TILT_DUR>) _param_vt_bt_tilt_dur
+				       )
 
 };
 #endif

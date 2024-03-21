@@ -1,6 +1,7 @@
 /****************************************************************************
  *
  * Copyright (c) 2015 Mark Charlebois. All rights reserved.
+ * Copyright (c) 2018 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,85 +32,91 @@
  *
  ****************************************************************************/
 
-/**
- * @file vdev_posix.cpp
- *
- * POSIX-like API for virtual character device
- */
-
 #include "cdev_platform.hpp"
 
-#include <string>
-#include <map>
-
-#include "vfile.h"
 #include "../CDev.hpp"
 
-#include <px4_log.h>
-#include <px4_posix.h>
-#include <px4_time.h>
+#include <px4_platform_common/log.h>
+#include <px4_platform_common/posix.h>
+#include <px4_platform_common/time.h>
 
-#include "DevMgr.hpp"
-
-using namespace std;
-using namespace DriverFramework;
+#include <stdlib.h>
 
 const cdev::px4_file_operations_t cdev::CDev::fops = {};
 
 pthread_mutex_t devmutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t filemutex = PTHREAD_MUTEX_INITIALIZER;
 
-px4_sem_t lockstep_sem;
-bool sim_lockstep = false;
-volatile bool sim_delay = false;
+struct px4_dev_t {
+	char *name{nullptr};
+	cdev::CDev *cdev{nullptr};
 
-#define PX4_MAX_FD 350
-static map<string, void *> devmap;
-static cdev::file_t filemap[PX4_MAX_FD] = {};
+	px4_dev_t(const char *n, cdev::CDev *c) : cdev(c)
+	{
+		name = strdup(n);
+	}
+
+	~px4_dev_t()
+	{
+		free(name);
+	}
+private:
+	px4_dev_t() = default;
+};
+
+#define PX4_MAX_FD 512
+static px4_dev_t *devmap[PX4_MAX_FD] {};
+static cdev::file_t filemap[PX4_MAX_FD] {};
+
+class VFile : public cdev::CDev
+{
+public:
+	VFile(const char *fname, mode_t mode) : cdev::CDev(fname) {}
+	~VFile() override = default;
+
+	ssize_t write(cdev::file_t *handlep, const char *buffer, size_t buflen) override
+	{
+		// ignore what was written, but let pollers know something was written
+		poll_notify(POLLIN);
+		return buflen;
+	}
+};
+
+static cdev::CDev *getDev(const char *path)
+{
+	pthread_mutex_lock(&devmutex);
+
+	for (const auto &dev : devmap) {
+		if (dev && (strcmp(dev->name, path) == 0)) {
+			pthread_mutex_unlock(&devmutex);
+			return dev->cdev;
+		}
+	}
+
+	pthread_mutex_unlock(&devmutex);
+
+	return nullptr;
+}
+
+static cdev::CDev *getFile(int fd)
+{
+	pthread_mutex_lock(&filemutex);
+	cdev::CDev *dev = nullptr;
+
+	if (fd < PX4_MAX_FD && fd >= 0) {
+		dev = filemap[fd].cdev;
+	}
+
+	pthread_mutex_unlock(&filemutex);
+	return dev;
+}
 
 extern "C" {
-
-	int px4_errno;
-
-	static cdev::CDev *getDev(const char *path)
-	{
-		PX4_DEBUG("CDev::getDev");
-
-		pthread_mutex_lock(&devmutex);
-
-		auto item = devmap.find(path);
-
-		if (item != devmap.end()) {
-			pthread_mutex_unlock(&devmutex);
-			return (cdev::CDev *)item->second;
-		}
-
-		pthread_mutex_unlock(&devmutex);
-
-		return nullptr;
-	}
-
-	static cdev::CDev *get_vdev(int fd)
-	{
-		pthread_mutex_lock(&filemutex);
-		bool valid = (fd < PX4_MAX_FD && fd >= 0 && filemap[fd].vdev);
-		cdev::CDev *dev;
-
-		if (valid) {
-			dev = (cdev::CDev *)(filemap[fd].vdev);
-
-		} else {
-			dev = nullptr;
-		}
-
-		pthread_mutex_unlock(&filemutex);
-		return dev;
-	}
 
 	int register_driver(const char *name, const cdev::px4_file_operations_t *fops, cdev::mode_t mode, void *data)
 	{
 		PX4_DEBUG("CDev::register_driver %s", name);
-		int ret = 0;
+		int ret = -ENOSPC;
 
 		if (name == nullptr || data == nullptr) {
 			return -EINVAL;
@@ -118,17 +125,27 @@ extern "C" {
 		pthread_mutex_lock(&devmutex);
 
 		// Make sure the device does not already exist
-		auto item = devmap.find(name);
-
-		if (item != devmap.end()) {
-			pthread_mutex_unlock(&devmutex);
-			return -EEXIST;
+		for (const auto &dev : devmap) {
+			if (dev && (strcmp(dev->name, name) == 0)) {
+				pthread_mutex_unlock(&devmutex);
+				return -EEXIST;
+			}
 		}
 
-		devmap[name] = (void *)data;
-		PX4_DEBUG("Registered DEV %s", name);
+		for (auto &dev : devmap) {
+			if (dev == nullptr) {
+				dev = new px4_dev_t(name, (cdev::CDev *)data);
+				PX4_DEBUG("Registered DEV %s", name);
+				ret = PX4_OK;
+				break;
+			}
+		}
 
 		pthread_mutex_unlock(&devmutex);
+
+		if (ret != PX4_OK) {
+			PX4_ERR("No free devmap entries - increase devmap size");
+		}
 
 		return ret;
 	}
@@ -144,9 +161,14 @@ extern "C" {
 
 		pthread_mutex_lock(&devmutex);
 
-		if (devmap.erase(name) > 0) {
-			PX4_DEBUG("Unregistered DEV %s", name);
-			ret = 0;
+		for (auto &dev : devmap) {
+			if (dev && (strcmp(name, dev->name) == 0)) {
+				delete dev;
+				dev = nullptr;
+				PX4_DEBUG("Unregistered DEV %s", name);
+				ret = PX4_OK;
+				break;
+			}
 		}
 
 		pthread_mutex_unlock(&devmutex);
@@ -172,15 +194,15 @@ extern "C" {
 
 			// Create the file
 			PX4_DEBUG("Creating virtual file %s", path);
-			dev = cdev::VFile::createFile(path, mode);
+			dev = new VFile(path, mode);
+			register_driver(path, nullptr, 0666, (void *)dev);
 		}
 
 		if (dev) {
-
 			pthread_mutex_lock(&filemutex);
 
 			for (i = 0; i < PX4_MAX_FD; ++i) {
-				if (filemap[i].vdev == nullptr) {
+				if (filemap[i].cdev == nullptr) {
 					filemap[i] = cdev::file_t(flags, dev);
 					break;
 				}
@@ -194,8 +216,9 @@ extern "C" {
 			} else {
 
 				const unsigned NAMELEN = 32;
-				char thread_name[NAMELEN] = {};
+				char thread_name[NAMELEN] {};
 
+				PX4_WARN("%s: exceeded maximum number of file descriptors, accessing %s", thread_name, path);
 #ifndef __PX4_QURT
 				int nret = pthread_getname_np(pthread_self(), thread_name, NAMELEN);
 
@@ -203,11 +226,8 @@ extern "C" {
 					PX4_WARN("failed getting thread name");
 				}
 
-				PX4_BACKTRACE();
 #endif
 
-				PX4_WARN("%s: exceeded maximum number of file descriptors, accessing %s",
-					 thread_name, path);
 				ret = -ENOENT;
 			}
 
@@ -216,6 +236,7 @@ extern "C" {
 		}
 
 		if (ret < 0) {
+			errno = -ret;
 			return -1;
 		}
 
@@ -227,13 +248,13 @@ extern "C" {
 	{
 		int ret;
 
-		cdev::CDev *dev = get_vdev(fd);
+		cdev::CDev *dev = getFile(fd);
 
 		if (dev) {
 			pthread_mutex_lock(&filemutex);
 			ret = dev->close(&filemap[fd]);
 
-			filemap[fd].vdev = nullptr;
+			filemap[fd].cdev = nullptr;
 
 			pthread_mutex_unlock(&filemutex);
 			PX4_DEBUG("px4_close fd = %d", fd);
@@ -243,7 +264,6 @@ extern "C" {
 		}
 
 		if (ret < 0) {
-			px4_errno = -ret;
 			ret = PX4_ERROR;
 		}
 
@@ -254,7 +274,7 @@ extern "C" {
 	{
 		int ret;
 
-		cdev::CDev *dev = get_vdev(fd);
+		cdev::CDev *dev = getFile(fd);
 
 		if (dev) {
 			PX4_DEBUG("px4_read fd = %d", fd);
@@ -265,7 +285,6 @@ extern "C" {
 		}
 
 		if (ret < 0) {
-			px4_errno = -ret;
 			ret = PX4_ERROR;
 		}
 
@@ -276,7 +295,7 @@ extern "C" {
 	{
 		int ret;
 
-		cdev::CDev *dev = get_vdev(fd);
+		cdev::CDev *dev = getFile(fd);
 
 		if (dev) {
 			PX4_DEBUG("px4_write fd = %d", fd);
@@ -287,7 +306,6 @@ extern "C" {
 		}
 
 		if (ret < 0) {
-			px4_errno = -ret;
 			ret = PX4_ERROR;
 		}
 
@@ -299,7 +317,7 @@ extern "C" {
 		PX4_DEBUG("px4_ioctl fd = %d", fd);
 		int ret = 0;
 
-		cdev::CDev *dev = get_vdev(fd);
+		cdev::CDev *dev = getFile(fd);
 
 		if (dev) {
 			ret = dev->ioctl(&filemap[fd], cmd, arg);
@@ -308,14 +326,10 @@ extern "C" {
 			ret = -EINVAL;
 		}
 
-		if (ret < 0) {
-			px4_errno = -ret;
-		}
-
 		return ret;
 	}
 
-	int px4_poll(px4_pollfd_struct_t *fds, nfds_t nfds, int timeout)
+	int px4_poll(px4_pollfd_struct_t *fds, unsigned int nfds, int timeout)
 	{
 		if (nfds == 0) {
 			PX4_WARN("px4_poll with no fds");
@@ -325,10 +339,9 @@ extern "C" {
 		px4_sem_t sem;
 		int count = 0;
 		int ret = -1;
-		unsigned int i;
 
 		const unsigned NAMELEN = 32;
-		char thread_name[NAMELEN] = {};
+		char thread_name[NAMELEN] {};
 
 #ifndef __PX4_QURT
 		int nret = pthread_getname_np(pthread_self(), thread_name, NAMELEN);
@@ -338,10 +351,6 @@ extern "C" {
 		}
 
 #endif
-
-		while (sim_delay) {
-			usleep(100);
-		}
 
 		PX4_DEBUG("Called px4_poll timeout = %d", timeout);
 
@@ -353,12 +362,12 @@ extern "C" {
 		// Go through all fds and check them for a pollable state
 		bool fd_pollable = false;
 
-		for (i = 0; i < nfds; ++i) {
+		for (unsigned int i = 0; i < nfds; ++i) {
 			fds[i].sem     = &sem;
 			fds[i].revents = 0;
 			fds[i].priv    = nullptr;
 
-			cdev::CDev *dev = get_vdev(fds[i].fd);
+			cdev::CDev *dev = getFile(fds[i].fd);
 
 			// If fd is valid
 			if (dev) {
@@ -366,8 +375,7 @@ extern "C" {
 				ret = dev->poll(&filemap[fds[i].fd], &fds[i], true);
 
 				if (ret < 0) {
-					PX4_WARN("%s: px4_poll() error: %s",
-						 thread_name, strerror(errno));
+					PX4_WARN("%s: px4_poll() error: %s", thread_name, strerror(errno));
 					break;
 				}
 
@@ -381,34 +389,23 @@ extern "C" {
 		// check for new data
 		if (fd_pollable) {
 			if (timeout > 0) {
-
 				// Get the current time
 				struct timespec ts;
-				// FIXME: check if QURT should probably be using CLOCK_MONOTONIC
-				px4_clock_gettime(CLOCK_REALTIME, &ts);
+				// Note, we can't actually use CLOCK_MONOTONIC on macOS
+				// but that's hidden and implemented in px4_clock_gettime.
+				px4_clock_gettime(CLOCK_MONOTONIC, &ts);
 
 				// Calculate an absolute time in the future
 				const unsigned billion = (1000 * 1000 * 1000);
-				unsigned tdiff = timeout;
-				uint64_t nsecs = ts.tv_nsec + (tdiff * 1000 * 1000);
+				uint64_t nsecs = ts.tv_nsec + ((uint64_t)timeout * 1000 * 1000);
 				ts.tv_sec += nsecs / billion;
 				nsecs -= (nsecs / billion) * billion;
 				ts.tv_nsec = nsecs;
 
-				// Execute a blocking wait for that time in the future
-				errno = 0;
 				ret = px4_sem_timedwait(&sem, &ts);
-#ifndef __PX4_DARWIN
-				ret = errno;
-#endif
 
-				// Ensure ret is negative on failure
-				if (ret > 0) {
-					ret = -ret;
-				}
-
-				if (ret && ret != -ETIMEDOUT) {
-					PX4_WARN("%s: px4_poll() sem error", thread_name);
+				if (ret && errno != ETIMEDOUT) {
+					PX4_WARN("%s: px4_poll() sem error: %s", thread_name, strerror(errno));
 				}
 
 			} else if (timeout < 0) {
@@ -417,9 +414,9 @@ extern "C" {
 
 			// We have waited now (or not, depending on timeout),
 			// go through all fds and count how many have data
-			for (i = 0; i < nfds; ++i) {
+			for (unsigned int i = 0; i < nfds; ++i) {
 
-				cdev::CDev *dev = get_vdev(fds[i].fd);
+				cdev::CDev *dev = getFile(fds[i].fd);
 
 				// If fd is valid
 				if (dev) {
@@ -445,11 +442,6 @@ extern "C" {
 		return (count) ? count : ret;
 	}
 
-	int px4_fsync(int fd)
-	{
-		return 0;
-	}
-
 	int px4_access(const char *pathname, int mode)
 	{
 		if (mode != F_OK) {
@@ -461,51 +453,6 @@ extern "C" {
 		return (dev != nullptr) ? 0 : -1;
 	}
 
-	void px4_show_devices()
-	{
-		int i = 0;
-		PX4_INFO("PX4 Devices:");
-
-		pthread_mutex_lock(&devmutex);
-
-		for (const auto &dev : devmap) {
-			if (strncmp(dev.first.c_str(), "/dev/", 5) == 0) {
-				PX4_INFO("   %s", dev.first.c_str());
-			}
-		}
-
-		pthread_mutex_unlock(&devmutex);
-
-		PX4_INFO("DF Devices:");
-		const char *dev_path;
-		unsigned int index = 0;
-		i = 0;
-
-		do {
-			// Each look increments index and returns -1 if end reached
-			i = DevMgr::getNextDeviceName(index, &dev_path);
-
-			if (i == 0) {
-				PX4_INFO("   %s", dev_path);
-			}
-		} while (i == 0);
-	}
-
-	void px4_show_topics()
-	{
-		PX4_INFO("Devices:");
-
-		pthread_mutex_lock(&devmutex);
-
-		for (const auto &dev : devmap) {
-			if (strncmp(dev.first.c_str(), "/obj/", 5) == 0) {
-				PX4_INFO("   %s", dev.first.c_str());
-			}
-		}
-
-		pthread_mutex_unlock(&devmutex);
-	}
-
 	void px4_show_files()
 	{
 		PX4_INFO("Files:");
@@ -513,39 +460,12 @@ extern "C" {
 		pthread_mutex_lock(&devmutex);
 
 		for (const auto &dev : devmap) {
-			if (strncmp(dev.first.c_str(), "/obj/", 5) != 0 &&
-			    strncmp(dev.first.c_str(), "/dev/", 5) != 0) {
-				PX4_INFO("   %s", dev.first.c_str());
+			if (dev) {
+				PX4_INFO_RAW("   %s\n", dev->name);
 			}
 		}
 
 		pthread_mutex_unlock(&devmutex);
-	}
-
-	void px4_enable_sim_lockstep()
-	{
-		px4_sem_init(&lockstep_sem, 0, 0);
-
-		// lockstep_sem use case is a signal
-		px4_sem_setprotocol(&lockstep_sem, SEM_PRIO_NONE);
-
-		sim_lockstep = true;
-		sim_delay = false;
-	}
-
-	void px4_sim_start_delay()
-	{
-		sim_delay = true;
-	}
-
-	void px4_sim_stop_delay()
-	{
-		sim_delay = false;
-	}
-
-	bool px4_sim_delay_enabled()
-	{
-		return sim_delay;
 	}
 
 } // extern "C"

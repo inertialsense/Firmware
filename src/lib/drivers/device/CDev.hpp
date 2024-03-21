@@ -43,8 +43,8 @@
 #include "Device.hpp"
 #include <lib/cdev/CDev.hpp>
 
-#include <px4_config.h>
-#include <px4_posix.h>
+#include <px4_platform_common/px4_config.h>
+#include <px4_platform_common/posix.h>
 
 /**
  * Namespace encapsulating all device framework classes, functions and data.
@@ -75,22 +75,12 @@ public:
 	/**
 	 * Perform an ioctl operation on the device.
 	 *
-	 * The default implementation handles DIOC_GETPRIV, and otherwise
-	 * returns -ENOTTY. Subclasses should call the default implementation
-	 * for any command they do not handle themselves.
-	 *
 	 * @param filep		Pointer to the NuttX file structure.
 	 * @param cmd		The ioctl command value.
 	 * @param arg		The ioctl argument value.
 	 * @return		OK on success, or -errno otherwise.
 	 */
-	virtual int	ioctl(file_t *filep, int cmd, unsigned long arg);
-
-protected:
-
-	bool		_pub_blocked{false};		/**< true if publishing should be blocked */
-
-private:
+	virtual int	ioctl(file_t *filep, int cmd, unsigned long arg) { return -ENOTTY; }
 
 };
 

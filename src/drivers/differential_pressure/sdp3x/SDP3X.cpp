@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2017 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2017-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,17 +33,56 @@
 
 #include "SDP3X.hpp"
 
-/**
- * @file SDP3X.hpp
- *
- * Driver for Sensirion SDP3X Differential Pressure Sensor
- *
- */
+using namespace time_literals;
 
-int
-SDP3X::probe()
+SDP3X::SDP3X(const I2CSPIDriverConfig &config) :
+	I2C(config),
+	I2CSPIDriver(config),
+	_keep_retrying(config.keep_running)
 {
-	return !init_sdp3x();
+}
+
+SDP3X::~SDP3X()
+{
+	perf_free(_sample_perf);
+	perf_free(_comms_errors);
+}
+
+int SDP3X::init()
+{
+	int ret = I2C::init();
+
+	if (ret != PX4_OK) {
+		DEVICE_DEBUG("I2C::init failed (%i)", ret);
+		return ret;
+	}
+
+	if (ret == PX4_OK) {
+		ScheduleNow();
+	}
+
+	return ret;
+}
+
+void SDP3X::print_status()
+{
+	I2CSPIDriverBase::print_status();
+
+	perf_print_counter(_sample_perf);
+	perf_print_counter(_comms_errors);
+}
+
+int SDP3X::probe()
+{
+	_retries = 1;
+	bool require_initialization = !init_sdp3x();
+
+	if (require_initialization && _keep_retrying) {
+		PX4_INFO("no sensor found, but will keep retrying");
+		return 0;
+	}
+
+	return require_initialization ? -1 : 0;
 }
 
 int SDP3X::write_command(uint16_t command)
@@ -54,77 +93,77 @@ int SDP3X::write_command(uint16_t command)
 	return transfer(&cmd[0], 2, nullptr, 0);
 }
 
-bool
-SDP3X::init_sdp3x()
+bool SDP3X::init_sdp3x()
 {
-	// step 1 - reset on broadcast
-	uint16_t prev_addr = get_device_address();
-	set_device_address(SDP3X_RESET_ADDR);
-	uint8_t reset_cmd = SDP3X_RESET_CMD;
-	int ret = transfer(&reset_cmd, 1, nullptr, 0);
-	set_device_address(prev_addr);
+	return configure() == 0;
+}
+
+int SDP3X::configure()
+{
+	int ret = write_command(SDP3X_CONT_MODE_STOP);
+
+	if (ret == PX4_OK) {
+		px4_udelay(500); // SDP3X is unresponsive for 500us after stop continuous measurement command
+		ret = write_command(SDP3X_CONT_MEAS_AVG_MODE);
+	}
 
 	if (ret != PX4_OK) {
 		perf_count(_comms_errors);
-		return false;
+		DEVICE_DEBUG("config failed");
+		_state = State::RequireConfig;
+		return ret;
 	}
 
-	// wait until sensor is ready
-	usleep(20000);
+	_state = State::Configuring;
 
-	// step 2 - configure
-	ret = write_command(SDP3X_CONT_MEAS_AVG_MODE);
+	return ret;
+}
 
-	if (ret != PX4_OK) {
-		perf_count(_comms_errors);
-		PX4_ERR("config failed");
-		return false;
-	}
-
-	usleep(10000);
-
-	// step 3 - get scale
+int SDP3X::read_scale()
+{
+	// get scale
 	uint8_t val[9];
-	ret = transfer(nullptr, 0, &val[0], sizeof(val));
+	int ret = transfer(nullptr, 0, &val[0], sizeof(val));
 
 	if (ret != PX4_OK) {
 		perf_count(_comms_errors);
 		PX4_ERR("get scale failed");
-		return false;
+		return ret;
 	}
 
 	// Check the CRC
 	if (!crc(&val[0], 2, val[2]) || !crc(&val[3], 2, val[5]) || !crc(&val[6], 2, val[8])) {
 		perf_count(_comms_errors);
-		return false;
+		return PX4_ERROR;
 	}
 
 	_scale = (((uint16_t)val[6]) << 8) | val[7];
 
 	switch (_scale) {
 	case SDP3X_SCALE_PRESSURE_SDP31:
-		_device_id.devid_s.devtype = DRV_DIFF_PRESS_DEVTYPE_SDP31;
+		set_device_type(DRV_DIFF_PRESS_DEVTYPE_SDP31);
 		break;
 
 	case SDP3X_SCALE_PRESSURE_SDP32:
-		_device_id.devid_s.devtype = DRV_DIFF_PRESS_DEVTYPE_SDP32;
+		set_device_type(DRV_DIFF_PRESS_DEVTYPE_SDP32);
 		break;
 
 	case SDP3X_SCALE_PRESSURE_SDP33:
-		_device_id.devid_s.devtype = DRV_DIFF_PRESS_DEVTYPE_SDP33;
+		set_device_type(DRV_DIFF_PRESS_DEVTYPE_SDP33);
 		break;
 	}
 
-	return true;
+	return PX4_OK;
 }
 
-int
-SDP3X::collect()
+int SDP3X::collect()
 {
 	perf_begin(_sample_perf);
 
-	// read 9 bytes from the sensor
-	uint8_t val[6];
+	const hrt_abstime timestamp_sample = hrt_absolute_time();
+
+	// read 6 bytes from the sensor
+	uint8_t val[6] {};
 	int ret = transfer(nullptr, 0, &val[0], sizeof(val));
 
 	if (ret != PX4_OK) {
@@ -135,53 +174,65 @@ SDP3X::collect()
 	// Check the CRC
 	if (!crc(&val[0], 2, val[2]) || !crc(&val[3], 2, val[5])) {
 		perf_count(_comms_errors);
-		return EAGAIN;
-
-	} else {
-		ret = 0;
+		return -EAGAIN;
 	}
 
 	int16_t P = (((int16_t)val[0]) << 8) | val[1];
 	int16_t temp = (((int16_t)val[3]) << 8) | val[4];
 
-	float diff_press_pa_raw = static_cast<float>(P) / static_cast<float>(_scale);
+	float diff_press_pa = static_cast<float>(P) / static_cast<float>(_scale);
 	float temperature_c = temp / static_cast<float>(SDP3X_SCALE_TEMPERATURE);
 
-	differential_pressure_s report;
-
-	report.timestamp = hrt_absolute_time();
-	report.error_count = perf_event_count(_comms_errors);
-	report.temperature = temperature_c;
-	report.differential_pressure_filtered_pa = _filter.apply(diff_press_pa_raw) - _diff_pres_offset;
-	report.differential_pressure_raw_pa = diff_press_pa_raw - _diff_pres_offset;
-	report.device_id = _device_id.devid;
-
-	if (_airspeed_pub != nullptr && !(_pub_blocked)) {
-		orb_publish(ORB_ID(differential_pressure), _airspeed_pub, &report);
-	}
-
-	ret = OK;
+	differential_pressure_s differential_pressure{};
+	differential_pressure.timestamp_sample = timestamp_sample;
+	differential_pressure.device_id = get_device_id();
+	differential_pressure.differential_pressure_pa = diff_press_pa;
+	differential_pressure.temperature = temperature_c;
+	differential_pressure.error_count = perf_event_count(_comms_errors);
+	differential_pressure.timestamp = hrt_absolute_time();
+	_differential_pressure_pub.publish(differential_pressure);
 
 	perf_end(_sample_perf);
 
 	return ret;
 }
 
-void
-SDP3X::cycle()
+void SDP3X::RunImpl()
 {
-	int ret = PX4_ERROR;
+	switch (_state) {
+	case State::RequireConfig:
+		if (configure() == PX4_OK) {
+			ScheduleDelayed(10_ms);
 
-	// measurement phase
-	ret = collect();
+		} else {
+			// periodically retry to configure
+			ScheduleDelayed(300_ms);
+		}
 
-	if (PX4_OK != ret) {
-		_sensor_ok = false;
-		DEVICE_DEBUG("measure error");
+		break;
+
+	case State::Configuring:
+		if (read_scale() == 0) {
+			_state = State::Running;
+
+		} else {
+			_state = State::RequireConfig;
+		}
+
+		ScheduleDelayed(10_ms);
+		break;
+
+	case State::Running:
+		int ret = collect();
+
+		if (ret != 0 && ret != -EAGAIN) {
+			DEVICE_DEBUG("measure error");
+			_state = State::RequireConfig;
+		}
+
+		ScheduleDelayed(CONVERSION_INTERVAL);
+		break;
 	}
-
-	// schedule a fresh cycle call when the measurement is done
-	work_queue(HPWORK, &_work, (worker_t)&Airspeed::cycle_trampoline, this, USEC2TICK(CONVERSION_INTERVAL));
 }
 
 bool SDP3X::crc(const uint8_t data[], unsigned size, uint8_t checksum)

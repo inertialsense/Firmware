@@ -37,7 +37,11 @@
 #pragma once
 
 #include <unit_test.h>
+#ifndef MAVLINK_FTP_UNIT_TEST
 #include "../mavlink_bridge_header.h"
+#else
+#include <mavlink.h>
+#endif
 #include "../mavlink_ftp.h"
 
 class MavlinkFtpTest : public UnitTest
@@ -76,6 +80,8 @@ private:
 	virtual void _init(void);
 	virtual void _cleanup(void);
 
+	bool _create_test_files(void);
+	bool _remove_test_files(void);
 	bool _ack_test(void);
 	bool _bad_opcode_test(void);
 	bool _bad_datasize_test(void);
@@ -92,12 +98,13 @@ private:
 	bool _removefile_test(void);
 
 	void _receive_message_handler_generic(const mavlink_file_transfer_protocol_t *ftp_req);
-	void _setup_ftp_msg(const MavlinkFTP::PayloadHeader *payload_header, uint8_t size, const uint8_t *data,
+	bool _setup_ftp_msg(const MavlinkFTP::PayloadHeader *payload_header,
+			    const uint8_t *data, const uint8_t data_len,
 			    mavlink_message_t *msg);
 	bool _decode_message(const mavlink_file_transfer_protocol_t *ftp_msg, const MavlinkFTP::PayloadHeader **payload);
 	bool _send_receive_msg(MavlinkFTP::PayloadHeader	*payload_header,
-			       uint8_t				size,
 			       const uint8_t			*data,
+			       const size_t			data_len,
 			       const MavlinkFTP::PayloadHeader	**payload_reply);
 	void _cleanup_microsd(void);
 

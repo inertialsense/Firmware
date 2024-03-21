@@ -5,12 +5,13 @@ import unittest
 import rospy
 import math
 from geometry_msgs.msg import PoseStamped
-from mavros_msgs.msg import Altitude, ExtendedState, HomePosition, State, \
+from mavros_msgs.msg import Altitude, ExtendedState, HomePosition, ParamValue, State, \
                             WaypointList
-from mavros_msgs.srv import CommandBool, ParamGet, SetMode, WaypointClear, \
+from mavros_msgs.srv import CommandBool, ParamGet, ParamSet, SetMode, SetModeRequest, WaypointClear, \
                             WaypointPush
 from pymavlink import mavutil
-from sensor_msgs.msg import NavSatFix
+from sensor_msgs.msg import NavSatFix, Imu
+from six.moves import xrange
 
 
 class MavrosTestCommon(unittest.TestCase):
@@ -21,6 +22,7 @@ class MavrosTestCommon(unittest.TestCase):
         self.altitude = Altitude()
         self.extended_state = ExtendedState()
         self.global_position = NavSatFix()
+        self.imu_data = Imu()
         self.home_position = HomePosition()
         self.local_position = PoseStamped()
         self.mission_wp = WaypointList()
@@ -31,7 +33,7 @@ class MavrosTestCommon(unittest.TestCase):
             key: False
             for key in [
                 'alt', 'ext_state', 'global_pos', 'home_pos', 'local_pos',
-                'mission_wp', 'state'
+                'mission_wp', 'state', 'imu'
             ]
         }
 
@@ -40,6 +42,7 @@ class MavrosTestCommon(unittest.TestCase):
         rospy.loginfo("waiting for ROS services")
         try:
             rospy.wait_for_service('mavros/param/get', service_timeout)
+            rospy.wait_for_service('mavros/param/set', service_timeout)
             rospy.wait_for_service('mavros/cmd/arming', service_timeout)
             rospy.wait_for_service('mavros/mission/push', service_timeout)
             rospy.wait_for_service('mavros/mission/clear', service_timeout)
@@ -48,6 +51,7 @@ class MavrosTestCommon(unittest.TestCase):
         except rospy.ROSException:
             self.fail("failed to connect to services")
         self.get_param_srv = rospy.ServiceProxy('mavros/param/get', ParamGet)
+        self.set_param_srv = rospy.ServiceProxy('mavros/param/set', ParamSet)
         self.set_arming_srv = rospy.ServiceProxy('mavros/cmd/arming',
                                                  CommandBool)
         self.set_mode_srv = rospy.ServiceProxy('mavros/set_mode', SetMode)
@@ -65,6 +69,9 @@ class MavrosTestCommon(unittest.TestCase):
         self.global_pos_sub = rospy.Subscriber('mavros/global_position/global',
                                                NavSatFix,
                                                self.global_position_callback)
+        self.imu_data_sub = rospy.Subscriber('mavros/imu/data',
+                                               Imu,
+                                               self.imu_data_callback)
         self.home_pos_sub = rospy.Subscriber('mavros/home_position/home',
                                              HomePosition,
                                              self.home_position_callback)
@@ -112,6 +119,12 @@ class MavrosTestCommon(unittest.TestCase):
 
         if not self.sub_topics_ready['global_pos']:
             self.sub_topics_ready['global_pos'] = True
+
+    def imu_data_callback(self, data):
+        self.imu_data = data
+
+        if not self.sub_topics_ready['imu']:
+            self.sub_topics_ready['imu'] = True
 
     def home_position_callback(self, data):
         self.home_position = data
@@ -222,6 +235,36 @@ class MavrosTestCommon(unittest.TestCase):
         self.assertTrue(mode_set, (
             "failed to set mode | new mode: {0}, old mode: {1} | timeout(seconds): {2}".
             format(mode, old_mode, timeout)))
+
+    def set_param(self, param_id, param_value, timeout):
+        """param: PX4 param string, ParamValue, timeout(int): seconds"""
+        if param_value.integer != 0:
+            value = param_value.integer
+        else:
+            value = param_value.real
+        rospy.loginfo("setting PX4 parameter: {0} with value {1}".
+        format(param_id, value))
+        loop_freq = 1  # Hz
+        rate = rospy.Rate(loop_freq)
+        param_set = False
+        for i in xrange(timeout * loop_freq):
+            try:
+                res = self.set_param_srv(param_id, param_value)
+                if res.success:
+                    rospy.loginfo("param {0} set to {1} | seconds: {2} of {3}".
+                    format(param_id, value, i / loop_freq, timeout))
+                break
+            except rospy.ServiceException as e:
+                rospy.logerr(e)
+
+            try:
+                rate.sleep()
+            except rospy.ROSException as e:
+                self.fail(e)
+
+        self.assertTrue(res.success, (
+            "failed to set param | param_id: {0}, param_value: {1} | timeout(seconds): {2}".
+            format(param_id, value, timeout)))
 
     def wait_for_topics(self, timeout):
         """wait for simulation to be ready, make sure we're getting topic info

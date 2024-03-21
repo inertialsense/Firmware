@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2015-2016 Estimation and Control Library (ECL). All rights reserved.
+ *   Copyright (c) 2015-2023 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -12,7 +12,7 @@
  *    notice, this list of conditions and the following disclaimer in
  *    the documentation and/or other materials provided with the
  *    distribution.
- * 3. Neither the name ECL nor the names of its contributors may be
+ * 3. Neither the name PX4 nor the names of its contributors may be
  *    used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -40,16 +40,29 @@
  */
 
 /**
- * Minimum time of arrival delta between non-IMU observations before data is downsampled.
- * Baro and Magnetometer data will be averaged before downsampling, other data will be point sampled resulting in loss of information.
+ * EKF prediction period
+ *
+ * EKF prediction period in microseconds. This should ideally be an integer multiple of the IMU time delta.
+ * Actual filter update will be an integer multiple of IMU update.
  *
  * @group EKF2
- * @min 10
- * @max 50
- * @reboot_required true
- * @unit ms
+ * @min 1000
+ * @max 20000
+ * @unit us
  */
-PARAM_DEFINE_INT32(EKF2_MIN_OBS_DT, 20);
+PARAM_DEFINE_INT32(EKF2_PREDICT_US, 10000);
+
+/**
+ * IMU control
+ *
+ * @group EKF2
+ * @min 0
+ * @max 7
+ * @bit 0 Gyro Bias
+ * @bit 1 Accel Bias
+ * @bit 2 Gravity vector fusion
+ */
+PARAM_DEFINE_INT32(EKF2_IMU_CTRL, 7);
 
 /**
  * Magnetometer measurement delay relative to IMU measurements
@@ -89,6 +102,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_DELAY, 110);
 
 /**
  * Optical flow measurement delay relative to IMU measurements
+ *
  * Assumes measurement is timestamped at trailing edge of integration period
  *
  * @group EKF2
@@ -98,7 +112,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_DELAY, 110);
  * @reboot_required true
  * @decimal 1
  */
-PARAM_DEFINE_FLOAT(EKF2_OF_DELAY, 5);
+PARAM_DEFINE_FLOAT(EKF2_OF_DELAY, 20);
 
 /**
  * Range finder measurement delay relative to IMU measurements
@@ -134,10 +148,10 @@ PARAM_DEFINE_FLOAT(EKF2_ASP_DELAY, 100);
  * @reboot_required true
  * @decimal 1
  */
-PARAM_DEFINE_FLOAT(EKF2_EV_DELAY, 175);
+PARAM_DEFINE_FLOAT(EKF2_EV_DELAY, 0);
 
 /**
- * Auxillary Velocity Estimate (e.g from a landing target) delay relative to IMU measurements
+ * Auxiliary Velocity Estimate (e.g from a landing target) delay relative to IMU measurements
  *
  * @group EKF2
  * @min 0
@@ -153,20 +167,20 @@ PARAM_DEFINE_FLOAT(EKF2_AVEL_DELAY, 5);
  *
  * Set bits to 1 to enable checks. Checks enabled by the following bit positions
  * 0 : Minimum required sat count set by EKF2_REQ_NSATS
- * 1 : Minimum required GDoP set by EKF2_REQ_GDOP
+ * 1 : Maximum allowed PDOP set by EKF2_REQ_PDOP
  * 2 : Maximum allowed horizontal position error set by EKF2_REQ_EPH
  * 3 : Maximum allowed vertical position error set by EKF2_REQ_EPV
  * 4 : Maximum allowed speed error set by EKF2_REQ_SACC
- * 5 : Maximum allowed horizontal position rate set by EKF2_REQ_HDRIFT. This check will only run when the vehicle is on ground and stationary. Detecton of the stationary condition is controlled by the EKF2_MOVE_TEST parameter.
- * 6 : Maximum allowed vertical position rate set by EKF2_REQ_VDRIFT. This check will only run when the vehicle is on ground and stationary. Detecton of the stationary condition is controlled by the EKF2_MOVE_TEST parameter.
- * 7 : Maximum allowed horizontal speed set by EKF2_REQ_HDRIFT. This check will only run when the vehicle is on ground and stationary. Detecton of the stationary condition is controlled by the EKF2_MOVE_TEST parameter.
+ * 5 : Maximum allowed horizontal position rate set by EKF2_REQ_HDRIFT. This check will only run when the vehicle is on ground and stationary.
+ * 6 : Maximum allowed vertical position rate set by EKF2_REQ_VDRIFT. This check will only run when the vehicle is on ground and stationary.
+ * 7 : Maximum allowed horizontal speed set by EKF2_REQ_HDRIFT. This check will only run when the vehicle is on ground and stationary.
  * 8 : Maximum allowed vertical velocity discrepancy set by EKF2_REQ_VDRIFT
  *
  * @group EKF2
  * @min 0
  * @max 511
  * @bit 0 Min sat count (EKF2_REQ_NSATS)
- * @bit 1 Min GDoP (EKF2_REQ_GDOP)
+ * @bit 1 Max PDOP (EKF2_REQ_PDOP)
  * @bit 2 Max horizontal position error (EKF2_REQ_EPH)
  * @bit 3 Max vertical position error (EKF2_REQ_EPV)
  * @bit 4 Max speed error (EKF2_REQ_SACC)
@@ -220,14 +234,14 @@ PARAM_DEFINE_FLOAT(EKF2_REQ_SACC, 0.5f);
 PARAM_DEFINE_INT32(EKF2_REQ_NSATS, 6);
 
 /**
- * Required GDoP to use GPS.
+ * Maximum PDOP to use GPS.
  *
  * @group EKF2
  * @min 1.5
  * @max 5.0
  * @decimal 1
  */
-PARAM_DEFINE_FLOAT(EKF2_REQ_GDOP, 2.5f);
+PARAM_DEFINE_FLOAT(EKF2_REQ_PDOP, 2.5f);
 
 /**
  * Maximum horizontal drift speed to use GPS.
@@ -268,7 +282,7 @@ PARAM_DEFINE_FLOAT(EKF2_GYR_NOISE, 1.5e-2f);
  * @group EKF2
  * @min 0.01
  * @max 1.0
- * @unit m/s/s
+ * @unit m/s^2
  * @decimal 2
  */
 PARAM_DEFINE_FLOAT(EKF2_ACC_NOISE, 3.5e-1f);
@@ -279,7 +293,7 @@ PARAM_DEFINE_FLOAT(EKF2_ACC_NOISE, 3.5e-1f);
  * @group EKF2
  * @min 0.0
  * @max 0.01
- * @unit rad/s**2
+ * @unit rad/s^2
  * @decimal 6
  */
 PARAM_DEFINE_FLOAT(EKF2_GYR_B_NOISE, 1.0e-3f);
@@ -290,7 +304,7 @@ PARAM_DEFINE_FLOAT(EKF2_GYR_B_NOISE, 1.0e-3f);
  * @group EKF2
  * @min 0.0
  * @max 0.01
- * @unit m/s**3
+ * @unit m/s^3
  * @decimal 6
  */
 PARAM_DEFINE_FLOAT(EKF2_ACC_B_NOISE, 3.0e-3f);
@@ -301,7 +315,7 @@ PARAM_DEFINE_FLOAT(EKF2_ACC_B_NOISE, 3.0e-3f);
  * @group EKF2
  * @min 0.0
  * @max 0.1
- * @unit Gauss/s
+ * @unit gauss/s
  * @decimal 6
  */
 PARAM_DEFINE_FLOAT(EKF2_MAG_B_NOISE, 1.0e-4f);
@@ -312,24 +326,26 @@ PARAM_DEFINE_FLOAT(EKF2_MAG_B_NOISE, 1.0e-4f);
  * @group EKF2
  * @min 0.0
  * @max 0.1
- * @unit Gauss/s
+ * @unit gauss/s
  * @decimal 6
  */
 PARAM_DEFINE_FLOAT(EKF2_MAG_E_NOISE, 1.0e-3f);
 
 /**
- * Process noise for wind velocity prediction.
+ * Process noise spectral density for wind velocity prediction.
+ *
+ * When unaided, the wind estimate uncertainty (1-sigma, in m/s) increases by this amount every second.
  *
  * @group EKF2
  * @min 0.0
  * @max 1.0
- * @unit m/s/s
+ * @unit m/s^2/sqrt(Hz)
  * @decimal 3
  */
-PARAM_DEFINE_FLOAT(EKF2_WIND_NOISE, 1.0e-1f);
+PARAM_DEFINE_FLOAT(EKF2_WIND_NSD, 5.0e-2f);
 
 /**
- * Measurement noise for gps horizontal velocity.
+ * Measurement noise for GNSS velocity.
  *
  * @group EKF2
  * @min 0.01
@@ -337,10 +353,10 @@ PARAM_DEFINE_FLOAT(EKF2_WIND_NOISE, 1.0e-1f);
  * @unit m/s
  * @decimal 2
  */
-PARAM_DEFINE_FLOAT(EKF2_GPS_V_NOISE, 0.5f);
+PARAM_DEFINE_FLOAT(EKF2_GPS_V_NOISE, 0.3f);
 
 /**
- * Measurement noise for gps position.
+ * Measurement noise for GNSS position.
  *
  * @group EKF2
  * @min 0.01
@@ -370,7 +386,7 @@ PARAM_DEFINE_FLOAT(EKF2_NOAID_NOISE, 10.0f);
  * @unit m
  * @decimal 2
  */
-PARAM_DEFINE_FLOAT(EKF2_BARO_NOISE, 2.0f);
+PARAM_DEFINE_FLOAT(EKF2_BARO_NOISE, 3.5f);
 
 /**
  * Measurement noise for magnetic heading fusion.
@@ -389,7 +405,7 @@ PARAM_DEFINE_FLOAT(EKF2_HEAD_NOISE, 0.3f);
  * @group EKF2
  * @min 0.001
  * @max 1.0
- * @unit Gauss
+ * @unit gauss
  * @decimal 3
  */
 PARAM_DEFINE_FLOAT(EKF2_MAG_NOISE, 5.0e-2f);
@@ -429,18 +445,7 @@ PARAM_DEFINE_FLOAT(EKF2_BETA_GATE, 5.0f);
 PARAM_DEFINE_FLOAT(EKF2_BETA_NOISE, 0.3f);
 
 /**
- * Magnetic declination
- *
- * @group EKF2
- * @volatile
- * @category system
- * @unit deg
- * @decimal 1
- */
-PARAM_DEFINE_FLOAT(EKF2_MAG_DECL, 0);
-
-/**
- * Gate size for magnetic heading fusion
+ * Gate size for heading fusion
  *
  * Sets the number of standard deviations used by the innovation consistency test.
  *
@@ -484,46 +489,31 @@ PARAM_DEFINE_INT32(EKF2_DECL_TYPE, 7);
 /**
  * Type of magnetometer fusion
  *
- * Integer controlling the type of magnetometer fusion used - magnetic heading or 3-component vector. The fuson of magnetomer data as a three component vector enables vehicle body fixed hard iron errors to be learned, but requires a stable earth field.
+ * Integer controlling the type of magnetometer fusion used - magnetic heading or 3-component vector.
+ * The fusion of magnetometer data as a three component vector enables vehicle body fixed hard iron errors to be learned, but requires a stable earth field.
  * If set to 'Automatic' magnetic heading fusion is used when on-ground and 3-axis magnetic field fusion in-flight with fallback to magnetic heading fusion if there is insufficient motion to make yaw or magnetic field states observable.
- * If set to 'Magnetic heading' magnetic heading fusion is used at all times
- * If set to '3-axis' 3-axis field fusion is used at all times.
- * If set to 'VTOL custom' the behaviour is the same as 'Automatic', but if fusing airspeed, magnetometer fusion is only allowed to modify the magnetic field states. This can be used by VTOL platforms with large magnetic field disturbances to prevent incorrect bias states being learned during forward flight operation which can adversely affect estimation accuracy after transition to hovering flight.
- * If set to 'MC custom' the behaviour is the same as 'Automatic, but if there are no earth frame position or velocity observations being used, the magnetometer will not be used. This enables vehicles to operate with no GPS in environments where the magnetic field cannot be used to provide a heading reference. Prior to flight, the yaw angle is assumed to be constant if movement tests controlled by the EKF2_MOVE_TEST parameter indicate that the vehicle is static. This allows the vehicle to be placed on the ground to learn the yaw gyro bias prior to flight.
- *
+ * If set to 'Magnetic heading' magnetic heading fusion is used at all times.
+ * If set to 'None' the magnetometer will not be used under any circumstance. If no external source of yaw is available, it is possible to use post-takeoff horizontal movement combined with GPS velocity measurements to align the yaw angle with the timer required (depending on the amount of movement and GPS data quality).
  * @group EKF2
  * @value 0 Automatic
  * @value 1 Magnetic heading
- * @value 2 3-axis
- * @value 3 VTOL customn
- * @value 4 MC custom
+ * @value 5 None
  * @reboot_required true
  */
 PARAM_DEFINE_INT32(EKF2_MAG_TYPE, 0);
 
 /**
- * Horizontal acceleration threshold used by automatic selection of magnetometer fusion method.
- * This parameter is used when the magnetometer fusion method is set automatically (EKF2_MAG_TYPE = 0). If the filtered horizontal acceleration is greater than this parameter value, then the EKF will use 3-axis magnetomer fusion.
+ * Horizontal acceleration threshold used for heading observability check
+ *
+ * The heading is assumed to be observable when the body acceleration is greater than this parameter when a global position/velocity aiding source is active.
  *
  * @group EKF2
  * @min 0.0
  * @max 5.0
- * @unit m/s**2
+ * @unit m/s^2
  * @decimal 2
  */
 PARAM_DEFINE_FLOAT(EKF2_MAG_ACCLIM, 0.5f);
-
-/**
- * Yaw rate threshold used by automatic selection of magnetometer fusion method.
- * This parameter is used when the magnetometer fusion method is set automatically (EKF2_MAG_TYPE = 0). If the filtered yaw rate is greater than this parameter value, then the EKF will use 3-axis magnetomer fusion.
- *
- * @group EKF2
- * @min 0.0
- * @max 0.5
- * @unit rad/s
- * @decimal 2
- */
-PARAM_DEFINE_FLOAT(EKF2_MAG_YAWLIM, 0.25f);
 
 /**
  * Gate size for barometric and GPS height fusion
@@ -538,7 +528,34 @@ PARAM_DEFINE_FLOAT(EKF2_MAG_YAWLIM, 0.25f);
 PARAM_DEFINE_FLOAT(EKF2_BARO_GATE, 5.0f);
 
 /**
- * Gate size for GPS horizontal position fusion
+ * Baro deadzone range for height fusion
+ *
+ * Sets the value of deadzone applied to negative baro innovations.
+ * Deadzone is enabled when EKF2_GND_EFF_DZ > 0.
+ *
+ * @group EKF2
+ * @min 0.0
+ * @max 10.0
+ * @unit m
+ * @decimal 1
+ */
+PARAM_DEFINE_FLOAT(EKF2_GND_EFF_DZ, 4.0f);
+
+/**
+ * Height above ground level for ground effect zone
+ *
+ * Sets the maximum distance to the ground level where negative baro innovations are expected.
+ *
+ * @group EKF2
+ * @min 0.0
+ * @max 5.0
+ * @unit m
+ * @decimal 1
+ */
+PARAM_DEFINE_FLOAT(EKF2_GND_MAX_HGT, 0.5f);
+
+/**
+ * Gate size for GNSS position fusion
  *
  * Sets the number of standard deviations used by the innovation consistency test.
  *
@@ -550,7 +567,7 @@ PARAM_DEFINE_FLOAT(EKF2_BARO_GATE, 5.0f);
 PARAM_DEFINE_FLOAT(EKF2_GPS_P_GATE, 5.0f);
 
 /**
- * Gate size for GPS velocity fusion
+ * Gate size for GNSS velocity fusion
  *
  * Sets the number of standard deviations used by the innovation consistency test.
  *
@@ -571,38 +588,15 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_V_GATE, 5.0f);
  * @unit SD
  * @decimal 1
  */
-PARAM_DEFINE_FLOAT(EKF2_TAS_GATE, 3.0f);
+PARAM_DEFINE_FLOAT(EKF2_TAS_GATE, 5.0f);
 
 /**
- * Integer bitmask controlling data fusion and aiding methods.
+ * Determines the reference source of height data used by the EKF.
  *
- * Set bits in the following positions to enable:
- * 0 : Set to true to use GPS data if available
- * 1 : Set to true to use optical flow data if available
- * 2 : Set to true to inhibit IMU bias estimation
- * 3 : Set to true to enable vision position fusion
- * 4 : Set to true to enable vision yaw fusion
- * 5 : Set to true to enable multi-rotor drag specific force fusion
- * 6 : set to true if the EV observations are in a non NED reference frame and need to be rotated before being used
+ * When multiple height sources are enabled at the same time, the height estimate will
+ * always converge towards the reference height source selected by this parameter.
  *
- * @group EKF2
- * @min 0
- * @max 127
- * @bit 0 use GPS
- * @bit 1 use optical flow
- * @bit 2 inhibit IMU bias estimation
- * @bit 3 vision position fusion
- * @bit 4 vision yaw fusion
- * @bit 5 multi-rotor drag fusion
- * @bit 6 rotate external vision
- * @reboot_required true
- */
-PARAM_DEFINE_INT32(EKF2_AID_MASK, 1);
-
-/**
- * Determines the primary source of height data used by the EKF.
- *
- * The range sensor option should only be used when for operation over a flat surface as the local NED origin will move up and down with ground level.
+ * The range sensor and vision options should only be used when for operation over a flat surface as the local NED origin will move up and down with ground level.
  *
  * @group EKF2
  * @value 0 Barometric pressure
@@ -611,7 +605,95 @@ PARAM_DEFINE_INT32(EKF2_AID_MASK, 1);
  * @value 3 Vision
  * @reboot_required true
  */
-PARAM_DEFINE_INT32(EKF2_HGT_MODE, 0);
+PARAM_DEFINE_INT32(EKF2_HGT_REF, 1);
+
+/**
+ * Barometric sensor height aiding
+ *
+ * If this parameter is enabled then the estimator will make use of the barometric height measurements to estimate its height in addition to other
+ * height sources (if activated).
+ *
+ * @group EKF2
+ * @boolean
+ */
+PARAM_DEFINE_INT32(EKF2_BARO_CTRL, 1);
+
+/**
+ * External vision (EV) sensor aiding
+ *
+ * Set bits in the following positions to enable:
+ * 0 : Horizontal position fusion
+ * 1 : Vertical position fusion
+ * 2 : 3D velocity fusion
+ * 3 : Yaw
+ *
+ * @group EKF2
+ * @min 0
+ * @max 15
+ * @bit 0 Horizontal position
+ * @bit 1 Vertical position
+ * @bit 2 3D velocity
+ * @bit 3 Yaw
+ */
+PARAM_DEFINE_INT32(EKF2_EV_CTRL, 15);
+
+/**
+ * GNSS sensor aiding
+ *
+ * Set bits in the following positions to enable:
+ * 0 : Longitude and latitude fusion
+ * 1 : Altitude fusion
+ * 2 : 3D velocity fusion
+ * 3 : Dual antenna heading fusion
+ *
+ * @group EKF2
+ * @min 0
+ * @max 15
+ * @bit 0 Lon/lat
+ * @bit 1 Altitude
+ * @bit 2 3D velocity
+ * @bit 3 Dual antenna heading
+ */
+PARAM_DEFINE_INT32(EKF2_GPS_CTRL, 7);
+
+/**
+ * Range sensor height aiding
+ *
+ * WARNING: Range finder measurements are less reliable and can experience unexpected errors.
+ * For these reasons, if accurate control of height relative to ground is required, it is recommended to use the MPC_ALT_MODE parameter instead,
+ * unless baro errors are severe enough to cause problems with landing and takeoff.
+ *
+ * To en-/disable range finder for terrain height estimation, use EKF2_TERR_MASK instead.
+ *
+ * If this parameter is enabled then the estimator will make use of the range finder measurements to estimate its height in addition to other
+ * height sources (if activated). Range sensor aiding can be enabled (i.e.: always use) or set in "conditional" mode.
+ *
+ * Conditional mode: This enables the range finder to be used during low speed (< EKF2_RNG_A_VMAX) and low altitude (< EKF2_RNG_A_HMAX)
+ * operation, eg takeoff and landing, where baro interference from rotor wash is excessive and can corrupt EKF state
+ * estimates. It is intended to be used where a vertical takeoff and landing is performed, and horizontal flight does
+ * not occur until above EKF2_RNG_A_HMAX.
+ *
+ * @group EKF2
+ * @value 0 Disable range fusion
+ * @value 1 Enabled (conditional mode)
+ * @value 2 Enabled
+ */
+PARAM_DEFINE_INT32(EKF2_RNG_CTRL, 1);
+
+/**
+ * Integer bitmask controlling fusion sources of the terrain estimator
+ *
+ * Set bits in the following positions to enable:
+ * 0 : Set to true to use range finder data if available
+ * 1 : Set to true to use optical flow data if available
+ *
+ * @group EKF2
+ * @min 0
+ * @max 3
+ * @bit 0 use range finder
+ * @bit 1 use optical flow
+ */
+PARAM_DEFINE_INT32(EKF2_TERR_MASK, 3);
 
 /**
  * Maximum lapsed time from last fusion of measurements that constrain velocity drift before the EKF will report the horizontal nav solution as invalid.
@@ -620,7 +702,7 @@ PARAM_DEFINE_INT32(EKF2_HGT_MODE, 0);
  * @group EKF2
  * @min 500000
  * @max 10000000
- * @unit uSec
+ * @unit us
  */
 PARAM_DEFINE_INT32(EKF2_NOAID_TOUT, 5000000);
 
@@ -635,7 +717,7 @@ PARAM_DEFINE_INT32(EKF2_NOAID_TOUT, 5000000);
 PARAM_DEFINE_FLOAT(EKF2_RNG_NOISE, 0.1f);
 
 /**
- * Range finder range dependant noise scaler.
+ * Range finder range dependent noise scaler.
  *
  * Specifies the increase in range finder noise with range.
  *
@@ -659,7 +741,9 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_SFE, 0.05f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_GATE, 5.0f);
 
 /**
- * Minimum valid range for the range finder
+ * Expected range finder reading when on ground.
+ *
+ * If the vehicle is on ground, is not moving as determined by the motion test and the range finder is returning invalid or no data, then an assumed range value of EKF2_MIN_RNG will be used by the terrain estimator so that a terrain height estimate is available at the start of flight in situations where the range finder may be inside its minimum measurements distance when on ground.
  *
  * @group EKF2
  * @min 0.01
@@ -668,38 +752,81 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_GATE, 5.0f);
  */
 PARAM_DEFINE_FLOAT(EKF2_MIN_RNG, 0.1f);
 
+/**
+ * External vision (EV) noise mode
+ *
+ * If set to 0 (default) the measurement noise is taken from the vision message and the EV noise parameters are used as a lower bound.
+ * If set to 1 the observation noise is set from the parameters directly,
+ *
+ * @value 0 EV reported variance (parameter lower bound)
+ * @value 1 EV noise parameters
+ * @group EKF2
+ */
+PARAM_DEFINE_INT32(EKF2_EV_NOISE_MD, 0);
 
 /**
- * Measurement noise for vision position observations used when the vision system does not supply error estimates
+ * External vision (EV) minimum quality (optional)
+ *
+ * External vision will only be started and fused if the quality metric is above this threshold.
+ * The quality metric is a completely optional field provided by some VIO systems.
+ *
+ * @group EKF2
+ * @min 0
+ * @max 100
+ * @decimal 1
+ */
+PARAM_DEFINE_INT32(EKF2_EV_QMIN, 0);
+
+/**
+ * Measurement noise for vision position observations used to lower bound or replace the uncertainty included in the message
  *
  * @group EKF2
  * @min 0.01
  * @unit m
  * @decimal 2
  */
-PARAM_DEFINE_FLOAT(EKF2_EVP_NOISE, 0.05f);
+PARAM_DEFINE_FLOAT(EKF2_EVP_NOISE, 0.1f);
 
 /**
- * Measurement noise for vision angle observations used when the vision system does not supply error estimates
+ * Measurement noise for vision velocity observations used to lower bound or replace the uncertainty included in the message
  *
  * @group EKF2
  * @min 0.01
+ * @unit m/s
+ * @decimal 2
+*/
+PARAM_DEFINE_FLOAT(EKF2_EVV_NOISE, 0.1f);
+
+/**
+ * Measurement noise for vision angle observations used to lower bound or replace the uncertainty included in the message
+ *
+ * @group EKF2
+ * @min 0.05
  * @unit rad
  * @decimal 2
  */
-PARAM_DEFINE_FLOAT(EKF2_EVA_NOISE, 0.05f);
+PARAM_DEFINE_FLOAT(EKF2_EVA_NOISE, 0.1f);
 
 /**
- * Gate size for vision estimate fusion
- *
- * Sets the number of standard deviations used by the innovation consistency test.
+ * Accelerometer measurement noise for gravity based observations.
  *
  * @group EKF2
- * @min 1.0
- * @unit SD
- * @decimal 1
+ * @min 0.1
+ * @max 10.0
+ * @unit g0
+ * @decimal 2
  */
-PARAM_DEFINE_FLOAT(EKF2_EV_GATE, 5.0f);
+PARAM_DEFINE_FLOAT(EKF2_GRAV_NOISE, 1.0f);
+
+/**
+ * Optical flow aiding
+ *
+ * Enable optical flow fusion.
+ *
+ * @group EKF2
+ * @boolean
+ */
+PARAM_DEFINE_INT32(EKF2_OF_CTRL, 0);
 
 /**
  * Measurement noise for the optical flow sensor when it's reported quality metric is at the maximum
@@ -725,13 +852,22 @@ PARAM_DEFINE_FLOAT(EKF2_OF_N_MIN, 0.15f);
 PARAM_DEFINE_FLOAT(EKF2_OF_N_MAX, 0.5f);
 
 /**
- * Optical Flow data will only be used if the sensor reports a quality metric >= EKF2_OF_QMIN.
+ * Optical Flow data will only be used in air if the sensor reports a quality metric >= EKF2_OF_QMIN.
  *
  * @group EKF2
  * @min 0
  * @max 255
  */
 PARAM_DEFINE_INT32(EKF2_OF_QMIN, 1);
+
+/**
+ * Optical Flow data will only be used on the ground if the sensor reports a quality metric >= EKF2_OF_QMIN_GND.
+ *
+ * @group EKF2
+ * @min 0
+ * @max 255
+ */
+PARAM_DEFINE_INT32(EKF2_OF_QMIN_GND, 0);
 
 /**
  * Gate size for optical flow fusion
@@ -766,7 +902,7 @@ PARAM_DEFINE_FLOAT(EKF2_TERR_NOISE, 5.0f);
 PARAM_DEFINE_FLOAT(EKF2_TERR_GRAD, 0.5f);
 
 /**
- * X position of IMU in body frame
+ * X position of IMU in body frame (forward axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -775,7 +911,7 @@ PARAM_DEFINE_FLOAT(EKF2_TERR_GRAD, 0.5f);
 PARAM_DEFINE_FLOAT(EKF2_IMU_POS_X, 0.0f);
 
 /**
- * Y position of IMU in body frame
+ * Y position of IMU in body frame (right axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -784,7 +920,7 @@ PARAM_DEFINE_FLOAT(EKF2_IMU_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Y, 0.0f);
 
 /**
- * Z position of IMU in body frame
+ * Z position of IMU in body frame (down axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -793,7 +929,7 @@ PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Z, 0.0f);
 
 /**
- * X position of GPS antenna in body frame
+ * X position of GPS antenna in body frame (forward axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -802,7 +938,7 @@ PARAM_DEFINE_FLOAT(EKF2_IMU_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_GPS_POS_X, 0.0f);
 
 /**
- * Y position of GPS antenna in body frame
+ * Y position of GPS antenna in body frame (right axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -811,7 +947,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Y, 0.0f);
 
 /**
- * Z position of GPS antenna in body frame
+ * Z position of GPS antenna in body frame (down axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -820,7 +956,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Z, 0.0f);
 
 /**
- * X position of range finder origin in body frame
+ * X position of range finder origin in body frame (forward axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -829,7 +965,7 @@ PARAM_DEFINE_FLOAT(EKF2_GPS_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_POS_X, 0.0f);
 
 /**
- * Y position of range finder origin in body frame
+ * Y position of range finder origin in body frame (right axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -838,7 +974,7 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Y, 0.0f);
 
 /**
- * Z position of range finder origin in body frame
+ * Z position of range finder origin in body frame (down axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -847,7 +983,7 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Z, 0.0f);
 
 /**
- * X position of optical flow focal point in body frame
+ * X position of optical flow focal point in body frame (forward axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -856,7 +992,7 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_OF_POS_X, 0.0f);
 
 /**
- * Y position of optical flow focal point in body frame
+ * Y position of optical flow focal point in body frame (right axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -865,7 +1001,7 @@ PARAM_DEFINE_FLOAT(EKF2_OF_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_OF_POS_Y, 0.0f);
 
 /**
- * Z position of optical flow focal point in body frame
+ * Z position of optical flow focal point in body frame (down axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -874,7 +1010,7 @@ PARAM_DEFINE_FLOAT(EKF2_OF_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_OF_POS_Z, 0.0f);
 
 /**
-* X position of VI sensor focal point in body frame
+* X position of VI sensor focal point in body frame (forward axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -883,7 +1019,7 @@ PARAM_DEFINE_FLOAT(EKF2_OF_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_EV_POS_X, 0.0f);
 
 /**
- * Y position of VI sensor focal point in body frame
+ * Y position of VI sensor focal point in body frame (right axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -892,7 +1028,7 @@ PARAM_DEFINE_FLOAT(EKF2_EV_POS_X, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_EV_POS_Y, 0.0f);
 
 /**
- * Z position of VI sensor focal point in body frame
+ * Z position of VI sensor focal point in body frame (down axis with origin relative to vehicle centre of gravity)
  *
  * @group EKF2
  * @unit m
@@ -901,10 +1037,12 @@ PARAM_DEFINE_FLOAT(EKF2_EV_POS_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_EV_POS_Z, 0.0f);
 
 /**
-* Airspeed fusion threshold. A value of zero will deactivate airspeed fusion. Any other positive
-* value will determine the minimum airspeed which will still be fused. Set to about 90% of the vehicles stall speed.
-* Both airspeed fusion and sideslip fusion must be active for the EKF to continue navigating after loss of GPS.
-* Use EKF2_FUSE_BETA to activate sideslip fusion.
+* Airspeed fusion threshold.
+*
+* Airspeed data is fused for wind estimation if above this threshold.
+* Set to 0 to disable airspeed fusion.
+* For reliable wind estimation both sideslip (see EKF2_FUSE_BETA) and airspeed fusion should be enabled.
+* Only applies to fixed-wing vehicles (or VTOLs in fixed-wing mode).
 *
 * @group EKF2
 * @min 0.0
@@ -914,11 +1052,11 @@ PARAM_DEFINE_FLOAT(EKF2_EV_POS_Z, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_ARSP_THR, 0.0f);
 
 /**
-* Boolean determining if synthetic sideslip measurements should fused.
+* Enable synthetic sideslip fusion.
 *
-* A value of 1 indicates that fusion is active
-* Both  sideslip fusion and airspeed fusion must be active for the EKF to continue navigating after loss of GPS.
-* Use EKF2_ARSP_THR to activate airspeed fusion.
+* For reliable wind estimation both sideslip and airspeed fusion (see EKF2_ARSP_THR) should be enabled.
+* Only applies to fixed-wing vehicles (or VTOLs in fixed-wing mode).
+* Note: side slip fusion is currently not supported for tailsitters.
 *
 * @group EKF2
 * @boolean
@@ -953,7 +1091,7 @@ PARAM_DEFINE_FLOAT(EKF2_TAU_POS, 0.25f);
  * @group EKF2
  * @min 0.0
  * @max 0.2
- * @unit rad/sec
+ * @unit rad/s
  * @reboot_required true
  * @decimal 2
  */
@@ -965,7 +1103,7 @@ PARAM_DEFINE_FLOAT(EKF2_GBIAS_INIT, 0.1f);
  * @group EKF2
  * @min 0.0
  * @max 0.5
- * @unit m/s/s
+ * @unit m/s^2
  * @reboot_required true
  * @decimal 2
  */
@@ -995,122 +1133,28 @@ PARAM_DEFINE_FLOAT(EKF2_ANGERR_INIT, 0.1f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_PITCH, 0.0f);
 
 /**
- * Learned value of magnetometer X axis bias.
- * This is the amount of X-axis magnetometer bias learned by the EKF and saved from the last flight. It must be set to zero if the ground based magnetometer calibration is repeated.
- *
- * @group EKF2
- * @min -0.5
- * @max 0.5
- * @reboot_required true
- * @volatile
- * @category system
- * @unit mGauss
- * @decimal 3
- */
-PARAM_DEFINE_FLOAT(EKF2_MAGBIAS_X, 0.0f);
-
-/**
- * Learned value of magnetometer Y axis bias.
- * This is the amount of Y-axis magnetometer bias learned by the EKF and saved from the last flight. It must be set to zero if the ground based magnetometer calibration is repeated.
- *
- * @group EKF2
- * @min -0.5
- * @max 0.5
- * @reboot_required true
- * @volatile
- * @category system
- * @unit mGauss
- * @decimal 3
- */
-PARAM_DEFINE_FLOAT(EKF2_MAGBIAS_Y, 0.0f);
-
-/**
- * Learned value of magnetometer Z axis bias.
- * This is the amount of Z-axis magnetometer bias learned by the EKF and saved from the last flight. It must be set to zero if the ground based magnetometer calibration is repeated.
- *
- * @group EKF2
- * @min -0.5
- * @max 0.5
- * @reboot_required true
- * @volatile
- * @category system
- * @unit mGauss
- * @decimal 3
- */
-PARAM_DEFINE_FLOAT(EKF2_MAGBIAS_Z, 0.0f);
-
-/**
- * ID of Magnetometer the learned bias is for.
- *
- * @group EKF2
- * @reboot_required true
- * @category system
- */
-PARAM_DEFINE_INT32(EKF2_MAGBIAS_ID, 0);
-
-/**
- * State variance assumed for magnetometer bias storage.
- * This is a reference variance used to calculate the fraction of learned magnetometer bias that will be used to update the stored value. Smaller values will make the stored bias data adjust more slowly from flight to flight. Larger values will make it adjust faster.
- *
- * @group EKF2
- * @reboot_required true
- * @unit mGauss**2
- * @decimal 8
- */
-PARAM_DEFINE_FLOAT(EKF2_MAGB_VREF, 2.5E-7f);
-
-/**
- * Maximum fraction of learned mag bias saved at each disarm.
- * Smaller values make the saved mag bias learn slower from flight to flight. Larger values make it learn faster. Must be > 0.0 and <= 1.0.
- *
- * @group EKF2
- * @min 0.0
- * @max 1.0
- * @decimal 2
- */
-PARAM_DEFINE_FLOAT(EKF2_MAGB_K, 0.2f);
-
-/**
- * Range sensor aid.
- *
- * If this parameter is enabled then the estimator will make use of the range finder measurements
- * to estimate it's height even if range sensor is not the primary height source. It will only do so if conditions
- * for range measurement fusion are met. This enables the range finder to be used during low speed and low altitude
- * operation, eg takeoff and landing, where baro interference from rotor wash is excessive and can corrupt EKF state
- * estimates. It is intended to be used where a vertical takeoff and landing is performed, and horizontal flight does
- * not occur until above EKF2_RNG_A_HMAX. If vehicle motion causes repeated switching between the primary height
- * sensor and range finder, an offset in the local position origin can accumulate. Also range finder measurements
- * are less reliable and can experience unexpected errors. For these reasons, if accurate control of height
- * relative to ground is required, it is recommended to use the MPC_ALT_MODE parameter instead, unless baro errors
- * are severe enough to cause problems with landing and takeoff.
- *
- * @group EKF2
- * @value 0 Range aid disabled
- * @value 1 Range aid enabled
- */
-PARAM_DEFINE_INT32(EKF2_RNG_AID, 0);
-
-/**
- * Maximum horizontal velocity allowed for range aid mode.
+ * Maximum horizontal velocity allowed for conditional range aid mode.
  *
  * If the vehicle horizontal speed exceeds this value then the estimator will not fuse range measurements
- * to estimate it's height. This only applies when range aid mode is activated (EKF2_RNG_AID = enabled).
+ * to estimate its height. This only applies when conditional range aid mode is activated (EKF2_RNG_CTRL = 1).
  *
  * @group EKF2
  * @min 0.1
  * @max 2
+ * @unit m/s
  */
 PARAM_DEFINE_FLOAT(EKF2_RNG_A_VMAX, 1.0f);
 
 /**
- * Maximum absolute altitude (height above ground level) allowed for range aid mode.
+ * Maximum absolute altitude (height above ground level) allowed for conditional range aid mode.
  *
  * If the vehicle absolute altitude exceeds this value then the estimator will not fuse range measurements
- * to estimate it's height. This only applies when range aid mode is activated (EKF2_RNG_AID = enabled).
+ * to estimate its height. This only applies when conditional range aid mode is activated (EKF2_RNG_CTRL = 1).
  *
  * @group EKF2
  * @min 1.0
  * @max 10.0
+ * @unit m
  */
 PARAM_DEFINE_FLOAT(EKF2_RNG_A_HMAX, 5.0f);
 
@@ -1128,40 +1172,125 @@ PARAM_DEFINE_FLOAT(EKF2_RNG_A_HMAX, 5.0f);
 PARAM_DEFINE_FLOAT(EKF2_RNG_A_IGATE, 1.0f);
 
 /**
+ * Minimum duration during which the reported range finder signal quality needs to be non-zero in order to be declared valid (s)
+ *
+ *
+ * @group EKF2
+ * @unit s
+ * @min 0.1
+ * @max 5
+*/
+PARAM_DEFINE_FLOAT(EKF2_RNG_QLTY_T, 1.0f);
+
+/**
+ * Gate size used for range finder kinematic consistency check
+ *
+ * To be used, the time derivative of the distance sensor measurements projected on the vertical axis
+ * needs to be statistically consistent with the estimated vertical velocity of the drone.
+ *
+ * Decrease this value to make the filter more robust against range finder faulty data (stuck, reflections, ...).
+ *
+ * Note: tune the range finder noise parameters (EKF2_RNG_NOISE and EKF2_RNG_SFE) before tuning this gate.
+ *
+ * @group EKF2
+ * @unit SD
+ * @min 0.1
+ * @max 5.0
+*/
+PARAM_DEFINE_FLOAT(EKF2_RNG_K_GATE, 1.0f);
+
+/**
+ * Gate size for vision velocity estimate fusion
+ *
+ * Sets the number of standard deviations used by the innovation consistency test.
+ *
+ * @group EKF2
+ * @min 1.0
+ * @unit SD
+ * @decimal 1
+*/
+PARAM_DEFINE_FLOAT(EKF2_EVV_GATE, 3.0f);
+
+/**
+ * Gate size for vision position fusion
+ *
+ * Sets the number of standard deviations used by the innovation consistency test.
+ * @group EKF2
+ * @min 1.0
+ * @unit SD
+ * @decimal 1
+*/
+PARAM_DEFINE_FLOAT(EKF2_EVP_GATE, 5.0f);
+
+/**
+ * Multirotor wind estimation selection
+ *
+ * Activate wind speed estimation using specific-force measurements and
+ * a drag model defined by EKF2_BCOEF_[XY] and EKF2_MCOEF.
+ *
+ * Only use on vehicles that have their thrust aligned with the Z axis and
+ * no thrust in the XY plane.
+ *
+ * @group EKF2
+ * @boolean
+ */
+PARAM_DEFINE_INT32(EKF2_DRAG_CTRL, 0);
+
+/**
  * Specific drag force observation noise variance used by the multi-rotor specific drag force model.
- * Increasing it makes the multi-rotor wind estimates adjust more slowly.
+ *
+ * Increasing this makes the multi-rotor wind estimates adjust more slowly.
  *
  * @group EKF2
  * @min 0.5
  * @max 10.0
- * @unit (m/sec**2)**2
+ * @unit (m/s^2)^2
  * @decimal 2
  */
 PARAM_DEFINE_FLOAT(EKF2_DRAG_NOISE, 2.5f);
 
 /**
- * X-axis ballistic coefficient used by the multi-rotor specific drag force model.
- * This should be adjusted to minimise variance of the X-axis drag specific force innovation sequence.
+ * X-axis ballistic coefficient used for multi-rotor wind estimation.
+ *
+ * This parameter controls the prediction of drag produced by bluff body drag along the forward/reverse axis when flying a multi-copter which enables estimation of wind drift when enabled by the EKF2_DRAG_CTRL parameter. The drag produced by this effect scales with speed squared. The predicted drag from the rotors is specified separately by the EKF2_MCOEF parameter.
+ * Set this parameter to zero to turn off the bluff body drag model for this axis.
  *
  * @group EKF2
- * @min 1.0
- * @max 100.0
- * @unit kg/m**2
+ * @min 0.0
+ * @max 200.0
+ * @unit kg/m^2
  * @decimal 1
  */
-PARAM_DEFINE_FLOAT(EKF2_BCOEF_X, 25.0f);
+PARAM_DEFINE_FLOAT(EKF2_BCOEF_X, 100.0f);
 
 /**
- * Y-axis ballistic coefficient used by the multi-rotor specific drag force model.
- * This should be adjusted to minimise variance of the Y-axis drag specific force innovation sequence.
+ * Y-axis ballistic coefficient used for multi-rotor wind estimation.
+ *
+ * This parameter controls the prediction of drag produced by bluff body drag along the right/left axis when flying a multi-copter, which enables estimation of wind drift when enabled by the EKF2_DRAG_CTRL parameter. The drag produced by this effect scales with speed squared. The predicted drag from the rotors is specified separately by the EKF2_MCOEF parameter.
+ * Set this parameter to zero to turn off the bluff body drag model for this axis.
  *
  * @group EKF2
- * @min 1.0
- * @max 100.0
- * @unit kg/m**2
+ * @min 0.0
+ * @max 200.0
+ * @unit kg/m^2
  * @decimal 1
  */
-PARAM_DEFINE_FLOAT(EKF2_BCOEF_Y, 25.0f);
+PARAM_DEFINE_FLOAT(EKF2_BCOEF_Y, 100.0f);
+
+/**
+ * Propeller momentum drag coefficient used for multi-rotor wind estimation.
+ *
+ * This parameter controls the prediction of drag produced by the propellers when flying a multi-copter, which enables estimation of wind drift when enabled by the EKF2_DRAG_CTRL parameter. The drag produced by this effect scales with speed not speed squared and is produced because some of the air velocity normal to the propeller axis of rotation is lost when passing through the rotor disc. This  changes the momentum of the flow which creates a drag reaction force. When comparing un-ducted propellers of the same diameter, the effect is roughly proportional to the area of the propeller blades when viewed side on and changes with propeller selection. Momentum drag is significantly higher for ducted rotors. To account for the drag produced by the body which scales with speed squared, see documentation for the EKF2_BCOEF_X and EKF2_BCOEF_Y parameters.
+ * Set this parameter to zero to turn off the momentum drag model for both axis.
+ *
+ * @group EKF2
+ * @min 0
+ * @max 1.0
+ * @unit 1/s
+ * @decimal 2
+ */
+PARAM_DEFINE_FLOAT(EKF2_MCOEF, 0.15f);
+
 
 /**
  * Upper limit on airspeed along individual axes used to correct baro for position error effects
@@ -1176,6 +1305,7 @@ PARAM_DEFINE_FLOAT(EKF2_ASPD_MAX, 20.0f);
 
 /**
  * Static pressure position error coefficient for the positive X axis
+ *
  * This is the ratio of static pressure error to dynamic pressure generated by a positive wind relative velocity along the X body axis.
  * If the baro height estimate rises during forward flight, then this will be a negative number.
  *
@@ -1188,6 +1318,7 @@ PARAM_DEFINE_FLOAT(EKF2_PCOEF_XP, 0.0f);
 
 /**
  * Static pressure position error coefficient for the negative X axis.
+ *
  * This is the ratio of static pressure error to dynamic pressure generated by a negative wind relative velocity along the X body axis.
  * If the baro height estimate rises during backwards flight, then this will be a negative number.
  *
@@ -1199,19 +1330,34 @@ PARAM_DEFINE_FLOAT(EKF2_PCOEF_XP, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_PCOEF_XN, 0.0f);
 
 /**
- * Pressure position error coefficient for the Y axis.
- * This is the ratio of static pressure error to dynamic pressure generated by a wind relative velocity along the Y body axis.
- * If the baro height estimate rises during sideways flight, then this will be a negative number.
+ * Pressure position error coefficient for the positive Y axis.
+ *
+ * This is the ratio of static pressure error to dynamic pressure generated by a wind relative velocity along the positive Y (RH) body axis.
+ * If the baro height estimate rises during sideways flight to the right, then this will be a negative number.
  *
  * @group EKF2
  * @min -0.5
  * @max 0.5
  * @decimal 2
  */
-PARAM_DEFINE_FLOAT(EKF2_PCOEF_Y, 0.0f);
+PARAM_DEFINE_FLOAT(EKF2_PCOEF_YP, 0.0f);
+
+/**
+ * Pressure position error coefficient for the negative Y axis.
+ *
+ * This is the ratio of static pressure error to dynamic pressure generated by a wind relative velocity along the negative Y (LH) body axis.
+ * If the baro height estimate rises during sideways flight to the left, then this will be a negative number.
+ *
+ * @group EKF2
+ * @min -0.5
+ * @max 0.5
+ * @decimal 2
+ */
+PARAM_DEFINE_FLOAT(EKF2_PCOEF_YN, 0.0f);
 
 /**
  * Static pressure position error coefficient for the Z axis.
+ *
  * This is the ratio of static pressure error to dynamic pressure generated by a wind relative velocity along the Z body axis.
  *
  * @group EKF2
@@ -1222,33 +1368,37 @@ PARAM_DEFINE_FLOAT(EKF2_PCOEF_Y, 0.0f);
 PARAM_DEFINE_FLOAT(EKF2_PCOEF_Z, 0.0f);
 
 /**
- * Accelerometer bias learning limit. The ekf delta velocity bias states will be limited to within a range equivalent to +- of this value.
+ * Accelerometer bias learning limit.
+ *
+ * The ekf accel bias states will be limited to within a range equivalent to +- of this value.
  *
  * @group EKF2
  * @min 0.0
  * @max 0.8
- * @unit m/s/s
+ * @unit m/s^2
  * @decimal 2
  */
 PARAM_DEFINE_FLOAT(EKF2_ABL_LIM, 0.4f);
 
 /**
  * Maximum IMU accel magnitude that allows IMU bias learning.
- * If the magnitude of the IMU accelerometer vector exceeds this value, the EKF delta velocity state estimation will be inhibited.
- * This reduces the adverse effect of high manoeuvre accelerations and IMU nonlinerity and scale factor errors on the delta velocity bias estimates.
+ *
+ * If the magnitude of the IMU accelerometer vector exceeds this value, the EKF accel bias state estimation will be inhibited.
+ * This reduces the adverse effect of high manoeuvre accelerations and IMU nonlinerity and scale factor errors on the accel bias estimates.
  *
  * @group EKF2
  * @min 20.0
  * @max 200.0
- * @unit m/s/s
+ * @unit m/s^2
  * @decimal 1
  */
 PARAM_DEFINE_FLOAT(EKF2_ABL_ACCLIM, 25.0f);
 
 /**
  * Maximum IMU gyro angular rate magnitude that allows IMU bias learning.
- * If the magnitude of the IMU angular rate vector exceeds this value, the EKF delta velocity state estimation will be inhibited.
- * This reduces the adverse effect of rapid rotation rates and associated errors on the delta velocity bias estimates.
+ *
+ * If the magnitude of the IMU angular rate vector exceeds this value, the EKF accel bias state estimation will be inhibited.
+ * This reduces the adverse effect of rapid rotation rates and associated errors on the accel bias estimates.
  *
  * @group EKF2
  * @min 2.0
@@ -1259,7 +1409,8 @@ PARAM_DEFINE_FLOAT(EKF2_ABL_ACCLIM, 25.0f);
 PARAM_DEFINE_FLOAT(EKF2_ABL_GYRLIM, 3.0f);
 
 /**
- * Time constant used by acceleration and angular rate magnitude checks used to inhibit delta velocity bias learning.
+ * Time constant used by acceleration and angular rate magnitude checks used to inhibit accel bias learning.
+ *
  * The vector magnitude of angular rate and acceleration used to check if learning should be inhibited has a peak hold filter applied to it with an exponential decay.
  * This parameter controls the time constant of the decay.
  *
@@ -1272,44 +1423,152 @@ PARAM_DEFINE_FLOAT(EKF2_ABL_GYRLIM, 3.0f);
 PARAM_DEFINE_FLOAT(EKF2_ABL_TAU, 0.5f);
 
 /**
- * Multi GPS Blending Control Mask.
+ * Gyro bias learning limit.
  *
- * Set bits in the following positions to set which GPS accuracy metrics will be used to calculate the blending weight. Set to zero to disable and always used first GPS instance.
- * 0 : Set to true to use speed accuracy
- * 1 : Set to true to use horizontal position accuracy
- * 2 : Set to true to use vertical position accuracy
+ * The ekf gyro bias states will be limited to within a range equivalent to +- of this value.
+ *
+ * @group EKF2
+ * @min 0.0
+ * @max 0.4
+ * @unit rad/s
+ * @decimal 3
+ */
+PARAM_DEFINE_FLOAT(EKF2_GYR_B_LIM, 0.15f);
+
+/**
+ * Required GPS health time on startup
+ *
+ * Minimum continuous period without GPS failure required to mark a healthy GPS status.
+ * It can be reduced to speed up initialization, but it's recommended to keep this unchanged for a vehicle.
+ *
+ * @group EKF2
+ * @min 0.1
+ * @decimal 1
+ * @unit s
+ * @reboot_required true
+ */
+PARAM_DEFINE_FLOAT(EKF2_REQ_GPS_H, 10.0f);
+
+/**
+ * Magnetic field strength test selection
+ *
+ * Bitmask to set which check is used to decide whether the magnetometer data is valid.
+ *
+ * If GNSS data is received, the magnetic field is compared to a World
+ * Magnetic Model (WMM), otherwise an average value is used.
+ * This check is useful to reject occasional hard iron disturbance.
+ *
+ * Set bits to 1 to enable checks. Checks enabled by the following bit positions
+ * 0 : Magnetic field strength. Set tolerance using EKF2_MAG_CHK_STR
+ * 1 : Magnetic field inclination. Set tolerance using EKF2_MAG_CHK_INC
+ * 2 : Wait for GNSS to find the theoretical strength and inclination using the WMM
  *
  * @group EKF2
  * @min 0
  * @max 7
- * @bit 0 use speed accuracy
- * @bit 1 use hpos accuracy
- * @bit 2 use vpos accuracy
+ * @bit 0 Strength (EKF2_MAG_CHK_STR)
+ * @bit 1 Inclination (EKF2_MAG_CHK_INC)
+ * @bit 2 Wait for WMM
  */
-PARAM_DEFINE_INT32(EKF2_GPS_MASK, 0);
+PARAM_DEFINE_INT32(EKF2_MAG_CHECK, 1);
 
 /**
- * Multi GPS Blending Time Constant
+ * Magnetic field strength check tolerance
  *
- * Sets the longest time constant that will be applied to the calculation of GPS position and height offsets used to correct data from multiple GPS data for steady state position differences.
+ * Maximum allowed deviation from the expected magnetic field strength to pass the check.
  *
+ * @group EKF2
+ * @min 0.0
+ * @max 1.0
+ * @unit gauss
+ * @decimal 2
+ */
+PARAM_DEFINE_FLOAT(EKF2_MAG_CHK_STR, 0.2f);
+
+/**
+ * Magnetic field inclination check tolerance
  *
+ * Maximum allowed deviation from the expected magnetic field inclination to pass the check.
+ *
+ * @group EKF2
+ * @min 0.0
+ * @max 90.0
+ * @unit deg
+ * @decimal 1
+ */
+PARAM_DEFINE_FLOAT(EKF2_MAG_CHK_INC, 20.f);
+
+/**
+ * Enable synthetic magnetometer Z component measurement.
+ *
+ * Use for vehicles where the measured body Z magnetic field is subject to strong magnetic interference.
+ * For magnetic heading fusion the magnetometer Z measurement will be replaced by a synthetic value calculated
+ * using the knowledge of the 3D magnetic field vector at the location of the drone. Therefore, this parameter
+ * will only have an effect if the global position of the drone is known.
+ * For 3D mag fusion the magnetometer Z measurement will simply be ignored instead of fusing the synthetic value.
+ *
+ * @group EKF2
+ * @boolean
+*/
+PARAM_DEFINE_INT32(EKF2_SYNT_MAG_Z, 0);
+
+/**
+ * Default value of true airspeed used in EKF-GSF AHRS calculation.
+ *
+ * If no airspeed measurements are available, the EKF-GSF AHRS calculation will assume this value of true airspeed when compensating for centripetal acceleration during turns. Set to zero to disable centripetal acceleration compensation during fixed wing flight modes.
+ *
+ * @group EKF2
+ * @min 0.0
+ * @unit m/s
+ * @max 100.0
+ * @decimal 1
+ */
+PARAM_DEFINE_FLOAT(EKF2_GSF_TAS, 15.0f);
+
+/**
+ * Aux global position (AGP) sensor aiding
+ *
+ * Set bits in the following positions to enable:
+ * 0 : Horizontal position fusion
+ * 1 : Vertical position fusion
+ *
+ * @group EKF2
+ * @min 0
+ * @max 3
+ * @bit 0 Horizontal position
+ * @bit 1 Vertical position
+ */
+PARAM_DEFINE_INT32(EKF2_AGP_CTRL, 1);
+
+/**
+ * Aux global position estimator delay relative to IMU measurements
+ *
+ * @group EKF2
+ * @min 0
+ * @max 300
+ * @unit ms
+ * @reboot_required true
+ * @decimal 1
+ */
+PARAM_DEFINE_FLOAT(EKF2_AGP_DELAY, 0);
+
+/**
+ * Measurement noise for aux global position observations used to lower bound or replace the uncertainty included in the message
+ *
+ * @group EKF2
+ * @min 0.01
+ * @unit m
+ * @decimal 2
+ */
+PARAM_DEFINE_FLOAT(EKF2_AGP_NOISE, 0.9f);
+
+/**
+ * Gate size for aux global position fusion
+ *
+ * Sets the number of standard deviations used by the innovation consistency test.
  * @group EKF2
  * @min 1.0
- * @max 100.0
- * @unit s
+ * @unit SD
  * @decimal 1
- */
-PARAM_DEFINE_FLOAT(EKF2_GPS_TAU, 10.0f);
-
-/**
- * Vehicle movement test threshold
- *
- * Scales the threshold tests applied to IMU data used to determine if the vehicle is static or moving. See parameter descriptions for EKF2_GPS_CHECK and EKF2_MAG_TYPE for further information on the functionality affected by this parameter.
- *
- * @group EKF2
- * @min 0.1
- * @max 10.0
- * @decimal 1
- */
-PARAM_DEFINE_FLOAT(EKF2_MOVE_TEST, 1.0f);
+*/
+PARAM_DEFINE_FLOAT(EKF2_AGP_GATE, 3.0f);

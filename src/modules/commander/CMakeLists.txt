@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2015 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2015-2023 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -30,32 +30,53 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
+
+add_subdirectory(Arming)
+add_subdirectory(failsafe)
+add_subdirectory(failure_detector)
+add_subdirectory(HealthAndArmingChecks)
+add_subdirectory(ModeUtil)
+add_subdirectory(MulticopterThrowLaunch)
+
 px4_add_module(
 	MODULE modules__commander
 	MAIN commander
-	STACK_MAIN 4096
-	STACK_MAX 2450
 	COMPILE_FLAGS
 	SRCS
 		accelerometer_calibration.cpp
 		airspeed_calibration.cpp
-		arm_auth.cpp
 		baro_calibration.cpp
 		calibration_routines.cpp
 		Commander.cpp
 		commander_helper.cpp
 		esc_calibration.cpp
+		factory_calibration_storage.cpp
 		gyro_calibration.cpp
-		health_flag_helper.cpp
+		HomePosition.cpp
+		ModeManagement.cpp
+		level_calibration.cpp
+		lm_fit.cpp
 		mag_calibration.cpp
-		PreflightCheck.cpp
 		rc_calibration.cpp
-		rc_check.cpp
-		state_machine_helper.cpp
-		failure_detector/FailureDetector.cpp
+		Safety.cpp
+		UserModeIntention.cpp
+		worker_thread.cpp
+	MODULE_CONFIG
+		module.yaml
 	DEPENDS
+		ArmAuthorization
 		circuit_breaker
-		df_driver_framework
-		git_ecl
-		ecl_geo
+		failsafe
+		failure_detector
+		geo
+		health_and_arming_checks
+		hysteresis
+		mode_util
+		MulticopterThrowLaunch
+		sensor_calibration
+		world_magnetic_model
+        atmosphere
 	)
+
+px4_add_unit_gtest(SRC mag_calibration_test.cpp LINKLIBS modules__commander)
+px4_add_functional_gtest(SRC ModeManagementTest.cpp LINKLIBS modules__commander)

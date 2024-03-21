@@ -1,7 +1,6 @@
 /****************************************************************************
- * px4/tests/test_time.c
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *  Copyright (C) 2012-2019 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,13 +31,14 @@
  *
  ****************************************************************************/
 
-/****************************************************************************
- * Included Files
- ****************************************************************************/
+/**
+ * @file test_time.c
+ * Tests clocks/timekeeping.
+ */
 
-#include <px4_config.h>
-#include <px4_defines.h>
-#include <px4_posix.h>
+#include <px4_platform_common/px4_config.h>
+#include <px4_platform_common/defines.h>
+#include <px4_platform_common/posix.h>
 #include <sys/types.h>
 
 #include <stdio.h>
@@ -47,8 +47,6 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include <arch/board/board.h>
-
 #include "tests_main.h"
 
 #include <math.h>
@@ -56,34 +54,10 @@
 #include <drivers/drv_hrt.h>
 
 
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-/****************************************************************************
- * Private Types
- ****************************************************************************/
-
-/****************************************************************************
- * Private Function Prototypes
- ****************************************************************************/
-
-/****************************************************************************
- * Private Data
- ****************************************************************************/
-
-/****************************************************************************
- * Public Data
- ****************************************************************************/
-
-/****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/* emulate hrt_absolute_time using the cycle counter */
 static hrt_abstime
 cycletime(void)
 {
+	/* emulate hrt_absolute_time using the cycle counter */
 	static uint64_t basetime;
 	static uint32_t lasttime;
 	uint32_t cycles;
@@ -99,65 +73,53 @@ cycletime(void)
 	return (basetime + cycles) / 168;	/* XXX magic number */
 }
 
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: test_time
- ****************************************************************************/
-
 int test_time(int argc, char *argv[])
 {
-	hrt_abstime h, c;
-	int64_t lowdelta, maxdelta = 0;
-	int64_t delta, deltadelta;
+	int maxdelta = 0;
 
 	/* enable the cycle counter */
 	(*(unsigned long *)0xe000edfc) |= (1 << 24);    /* DEMCR |= DEMCR_TRCENA */
 	(*(unsigned long *)0xe0001000) |= 1;    	/* DWT_CTRL |= DWT_CYCCNT_ENA */
 
 	/* get an average delta between the two clocks - this should stay roughly the same */
-	delta = 0;
+	int delta = 0;
 
 	for (unsigned i = 0; i < 100; i++) {
-		uint32_t flags = px4_enter_critical_section();
-
-		h = hrt_absolute_time();
-		c = cycletime();
-
+		irqstate_t flags = px4_enter_critical_section();
+		hrt_abstime h = hrt_absolute_time();
+		hrt_abstime c = cycletime();
 		px4_leave_critical_section(flags);
 
 		delta += h - c;
 	}
 
-	lowdelta = abs(delta / 100);
+	int lowdelta = abs(delta / 100);
 
 	/* loop checking the time */
 	for (unsigned i = 0; i < 100; i++) {
 
-		usleep(rand());
+		usleep(rand() % SHRT_MAX);
 
 		uint32_t flags = px4_enter_critical_section();
 
-		c = cycletime();
-		h = hrt_absolute_time();
+		hrt_abstime c = cycletime();
+		hrt_abstime h = hrt_absolute_time();
 
 		px4_leave_critical_section(flags);
 
-		delta = abs(h - c);
-		deltadelta = abs(delta - lowdelta);
+		delta = h - c;
+		int deltadelta = abs(delta - lowdelta);
 
 		if (deltadelta > maxdelta) {
 			maxdelta = deltadelta;
 		}
 
 		if (deltadelta > 1000) {
-			fprintf(stderr, "h %" PRIu64 " c %" PRIu64 " d %" PRId64 "\n", h, c, delta - lowdelta);
+			fprintf(stderr, "h %" PRIu64 " c %" PRIu64 " d %d\n", h, c, delta - lowdelta);
 		}
 	}
 
-	printf("Maximum jitter %" PRId64 "us\n", maxdelta);
+	printf("Maximum jitter %dus\n", maxdelta);
 
 	return 0;
 }

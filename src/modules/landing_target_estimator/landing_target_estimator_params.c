@@ -50,7 +50,7 @@
  *
  * @min 0
  * @max 1
- * @group Landing target Estimator
+ * @group Landing Target Estimator
  * @value 0 Moving
  * @value 1 Stationary
  */
@@ -66,7 +66,7 @@ PARAM_DEFINE_INT32(LTEST_MODE, 0);
  * @min 0.01
  * @decimal 2
  *
- * @group Landing target Estimator
+ * @group Landing Target Estimator
  */
 PARAM_DEFINE_FLOAT(LTEST_ACC_UNC, 10.0f);
 
@@ -74,12 +74,12 @@ PARAM_DEFINE_FLOAT(LTEST_ACC_UNC, 10.0f);
  * Landing target measurement uncertainty
  *
  * Variance of the landing target measurement from the driver.
- * Higher values results in less agressive following of the measurement and a smoother output as well as fewer rejected measurements.
+ * Higher values result in less aggressive following of the measurement and a smoother output as well as fewer rejected measurements.
  *
  * @unit tan(rad)^2
  * @decimal 4
  *
- * @group Landing target Estimator
+ * @group Landing Target Estimator
  */
 PARAM_DEFINE_FLOAT(LTEST_MEAS_UNC, 0.005f);
 
@@ -92,20 +92,20 @@ PARAM_DEFINE_FLOAT(LTEST_MEAS_UNC, 0.005f);
  * @min 0.001
  * @decimal 3
  *
- * @group Landing target Estimator
+ * @group Landing Target Estimator
  */
 PARAM_DEFINE_FLOAT(LTEST_POS_UNC_IN, 0.1f);
 
 /**
  * Initial landing target velocity uncertainty
  *
- * Initial variance of the relative landing target velocity in x and y direction
+ * Initial variance of the relative landing target velocity in x and y directions
  *
  * @unit (m/s)^2
  * @min 0.001
  * @decimal 3
  *
- * @group Landing target Estimator
+ * @group Landing Target Estimator
  */
 PARAM_DEFINE_FLOAT(LTEST_VEL_UNC_IN, 0.1f);
 
@@ -117,7 +117,7 @@ PARAM_DEFINE_FLOAT(LTEST_VEL_UNC_IN, 0.1f);
  * @min 0.01
  * @decimal 3
  *
- * @group Landing target Estimator
+ * @group Landing Target Estimator
  */
 PARAM_DEFINE_FLOAT(LTEST_SCALE_X, 1.0f);
 
@@ -129,6 +129,61 @@ PARAM_DEFINE_FLOAT(LTEST_SCALE_X, 1.0f);
  * @min 0.01
  * @decimal 3
  *
- * @group Landing target Estimator
+ * @group Landing Target Estimator
  */
 PARAM_DEFINE_FLOAT(LTEST_SCALE_Y, 1.0f);
+
+
+/**
+ * Rotation of IRLOCK sensor relative to airframe
+ *
+ * Default orientation of Yaw 90°
+ *
+ * @value 0 No rotation
+ * @value 1 Yaw 45°
+ * @value 2 Yaw 90°
+ * @value 3 Yaw 135°
+ * @value 4 Yaw 180°
+ * @value 5 Yaw 225°
+ * @value 6 Yaw 270°
+ * @value 7 Yaw 315°
+ *
+ * @min -1
+ * @max 40
+ * @reboot_required true
+ * @group Landing Target Estimator
+ */
+PARAM_DEFINE_INT32(LTEST_SENS_ROT, 2);
+
+/**
+ * X Position of IRLOCK in body frame (forward)
+ *
+ * @reboot_required true
+ * @unit m
+ * @decimal 3
+ * @group Landing Target Estimator
+ *
+ */
+PARAM_DEFINE_FLOAT(LTEST_SENS_POS_X, 0.0f);
+
+/**
+ * Y Position of IRLOCK in body frame (right)
+ *
+ * @reboot_required true
+ * @unit m
+ * @decimal 3
+ * @group Landing Target Estimator
+ *
+ */
+PARAM_DEFINE_FLOAT(LTEST_SENS_POS_Y, 0.0f);
+
+/**
+ * Z Position of IRLOCK in body frame (downward)
+ *
+ * @reboot_required true
+ * @unit m
+ * @decimal 3
+ * @group Landing Target Estimator
+ *
+ */
+PARAM_DEFINE_FLOAT(LTEST_SENS_POS_Z, 0.0f);

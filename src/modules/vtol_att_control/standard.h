@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2015 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2015-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,8 +46,6 @@
 #ifndef STANDARD_H
 #define STANDARD_H
 #include "vtol_type.h"
-#include <parameters/param.h>
-#include <drivers/drv_hrt.h>
 
 class Standard : public VtolType
 {
@@ -55,53 +53,36 @@ class Standard : public VtolType
 public:
 
 	Standard(VtolAttitudeControl *_att_controller);
-	~Standard() = default;
+	~Standard() override = default;
 
-	virtual void update_vtol_state();
-	virtual void update_transition_state();
-	virtual void update_fw_state();
-	virtual void update_mc_state();
-	virtual void fill_actuator_outputs();
-	virtual void waiting_on_tecs();
+	void update_vtol_state() override;
+	void update_transition_state() override;
+	void update_fw_state() override;
+	void update_mc_state() override;
+	void fill_actuator_outputs() override;
+	void waiting_on_tecs() override;
+	void blendThrottleAfterFrontTransition(float scale) override;
 
 private:
 
-	struct {
-		float pusher_ramp_dt;
-		float back_trans_ramp;
-		float down_pitch_max;
-		float forward_thrust_scale;
-		float pitch_setpoint_offset;
-		float reverse_output;
-		float reverse_delay;
-	} _params_standard;
-
-	struct {
-		param_t pusher_ramp_dt;
-		param_t back_trans_ramp;
-		param_t down_pitch_max;
-		param_t forward_thrust_scale;
-		param_t pitch_setpoint_offset;
-		param_t reverse_output;
-		param_t reverse_delay;
-	} _params_handles_standard;
-
-	enum vtol_mode {
+	enum class vtol_mode {
 		MC_MODE = 0,
 		TRANSITION_TO_FW,
 		TRANSITION_TO_MC,
 		FW_MODE
 	};
 
-	struct {
-		vtol_mode flight_mode;			// indicates in which mode the vehicle is in
-		hrt_abstime transition_start;	// at what time did we start a transition (front- or backtransition)
-	} _vtol_schedule;
+	vtol_mode _vtol_mode{vtol_mode::MC_MODE};			/**< vtol flight mode, defined by enum vtol_mode */
 
-	float _pusher_throttle;
-	float _reverse_output;
-	float _airspeed_trans_blend_margin;
+	float _pusher_throttle{0.0f};
+	float _airspeed_trans_blend_margin{0.0f};
 
-	virtual void parameters_update();
+	void parameters_update() override;
+
+	DEFINE_PARAMETERS_CUSTOM_PARENT(VtolType,
+					(ParamFloat<px4::params::VT_PSHER_SLEW>) _param_vt_psher_slew,
+					(ParamFloat<px4::params::VT_B_TRANS_RAMP>) _param_vt_b_trans_ramp,
+					(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off
+				       )
 };
 #endif

@@ -40,10 +40,10 @@
  *
  */
 
-#include <px4_config.h>
-#include <px4_defines.h>
-#include <px4_tasks.h>
-#include <px4_posix.h>
+#include <px4_platform_common/px4_config.h>
+#include <px4_platform_common/defines.h>
+#include <px4_platform_common/tasks.h>
+#include <px4_platform_common/posix.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -98,7 +98,7 @@ int landing_target_estimator_main(int argc, char *argv[])
 		daemon_task = px4_task_spawn_cmd("landing_target_estimator",
 						 SCHED_DEFAULT,
 						 SCHED_PRIORITY_DEFAULT,
-						 2000,
+						 2100,
 						 landing_target_estimator_thread_main,
 						 (argv) ? (char *const *)&argv[2] : nullptr);
 		return 0;
@@ -140,7 +140,7 @@ int landing_target_estimator_thread_main(int argc, char *argv[])
 
 	while (!thread_should_exit) {
 		est.update();
-		usleep(1000000 / landing_target_estimator_UPDATE_RATE_HZ);
+		px4_usleep(1000000 / landing_target_estimator_UPDATE_RATE_HZ);
 	}
 
 	PX4_DEBUG("exiting");

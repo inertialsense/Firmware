@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2016 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2016-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,16 +39,21 @@
  */
 
 #include "mavlink_shell.h"
-#include <px4_defines.h>
+#include <px4_platform_common/defines.h>
+#include <px4_platform_common/log.h>
+#include <px4_platform_common/posix.h>
 
 #include <unistd.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 
-
 #ifdef __PX4_NUTTX
 #include <nshlib/nshlib.h>
 #endif /* __PX4_NUTTX */
+
+#ifdef __PX4_POSIX
+#include "../../../platforms/posix/src/px4/common/px4_daemon/pxh.h"
+#endif /* __PX4_POSIX */
 
 #ifdef __PX4_CYGWIN
 #include <asm/socket.h>
@@ -69,11 +74,10 @@ MavlinkShell::~MavlinkShell()
 
 int MavlinkShell::start()
 {
-	//this currently only works for NuttX
-#ifndef __PX4_NUTTX
+	//this currently only works for NuttX & POSIX
+#if !defined(__PX4_NUTTX) && !defined(__PX4_POSIX)
 	return -1;
-#endif /* __PX4_NUTTX */
-
+#endif
 
 	PX4_INFO("Starting mavlink shell");
 
@@ -84,8 +88,6 @@ int MavlinkShell::start()
 	 * keeps (duplicates) the first 3 fd's when creating a new task, all others are not inherited.
 	 * This means we need to temporarily change the first 3 fd's of the current task (or at least
 	 * the first 2 if stdout=stderr).
-	 * And we hope :-) that during the temporary phase, no other thread from the same task writes to
-	 * stdout (as it would end up in the pipe).
 	 */
 
 	if (pipe(p1) != 0) {
@@ -105,6 +107,25 @@ int MavlinkShell::start()
 	_shell_fds[0]  = p2[0];
 	_shell_fds[1] = p1[1];
 
+	/*
+	 * Ensure that during the temporary phase no other thread from the same task writes to
+	 * stdout (as it would end up in the pipe).
+	 */
+#ifdef __PX4_NUTTX
+	sched_lock();
+#endif /* __PX4_NUTTX */
+
+#ifdef __PX4_POSIX
+	int remote_in_fd = dup(_shell_fds[0]);	// Input file descriptor for the remote shell
+	int remote_out_fd = dup(_shell_fds[1]); // Output file descriptor for the remote shell
+
+	char r_in[32];
+	char r_out[32];
+	snprintf(r_in, sizeof(r_in), "%d", remote_in_fd);
+	snprintf(r_out, sizeof(r_out), "%d", remote_out_fd);
+	char *const argv[3] = {r_in, r_out, nullptr};
+
+#else
 	int fd_backups[2]; //we don't touch stderr, we will redirect it to stdout in the startup of the shell task
 
 	for (int i = 0; i < 2; ++i) {
@@ -117,6 +138,7 @@ int MavlinkShell::start()
 
 	dup2(_shell_fds[0], 0);
 	dup2(_shell_fds[1], 1);
+#endif
 
 	if (ret == 0) {
 		_task = px4_task_spawn_cmd("mavlink_shell",
@@ -124,12 +146,18 @@ int MavlinkShell::start()
 					   SCHED_PRIORITY_DEFAULT,
 					   2048,
 					   &MavlinkShell::shell_start_thread,
+#ifdef __PX4_POSIX
+					   argv);
+#else
 					   nullptr);
+#endif
 
 		if (_task < 0) {
 			ret = -1;
 		}
 	}
+
+#if !defined(__PX4_POSIX)
 
 	//restore fd's
 	for (int i = 0; i < 2; ++i) {
@@ -140,20 +168,46 @@ int MavlinkShell::start()
 		close(fd_backups[i]);
 	}
 
+#endif
+
 	//close unused pipe fd's
 	close(_shell_fds[0]);
 	close(_shell_fds[1]);
+
+#ifdef __PX4_NUTTX
+	sched_unlock();
+#endif /* __PX4_NUTTX */
 
 	return ret;
 }
 
 int MavlinkShell::shell_start_thread(int argc, char *argv[])
 {
+#ifdef __PX4_NUTTX
 	dup2(1, 2); //redirect stderror to stdout
 
-#ifdef __PX4_NUTTX
-	nsh_consolemain(0, NULL);
+	const int ret = nsh_consolemain(0, NULL);
+
+	if (ret) {
+		PX4_ERR("Mavlink shell failed: %d%s", ret, (ret == -ENOMEM) ? " (out of memory)" : "");
+		return ret;
+	}
+
 #endif /* __PX4_NUTTX */
+
+#ifdef __PX4_POSIX
+
+	if (argc != 3) {
+		PX4_ERR("Mavlink shell bug");
+		return -1;
+	}
+
+	int remote_in_fd = atoi(argv[1]);
+	int remote_out_fd = atoi(argv[2]);
+
+	px4_daemon::Pxh pxh;
+	pxh.run_remote_pxh(remote_in_fd, remote_out_fd);
+#endif
 
 	return 0;
 }

@@ -33,10 +33,9 @@
 px4_add_module(
 	MODULE systemcmds__sd_bench
 	MAIN sd_bench
-	STACK_MAIN 2500
 	COMPILE_FLAGS
 	SRCS
-		sd_bench.c
+		sd_bench.cpp
 	DEPENDS
 	)
 

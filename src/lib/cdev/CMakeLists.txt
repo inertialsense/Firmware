@@ -32,18 +32,29 @@
 ############################################################################
 
 set(SRCS_PLATFORM)
-if (${OS} STREQUAL "nuttx")
+if (${PX4_PLATFORM} STREQUAL "nuttx")
 	list(APPEND SRCS_PLATFORM
 		nuttx/cdev_platform.cpp
+		nuttx/cdev_platform.hpp
 	)
 else()
 	list(APPEND SRCS_PLATFORM
 		posix/cdev_platform.cpp
-		posix/vfile.cpp
+		posix/cdev_platform.hpp
 	)
 endif()
 
 px4_add_library(cdev
 	CDev.cpp
+	CDev.hpp
 	${SRCS_PLATFORM}
-	)
+)
+target_compile_options(cdev PRIVATE ${MAX_CUSTOM_OPT_LEVEL})
+
+if (${PX4_PLATFORM} STREQUAL "nuttx")
+	target_link_libraries(cdev PRIVATE nuttx_fs) # register/unregister driver
+endif()
+
+if(PX4_TESTING)
+	add_subdirectory(test)
+endif()

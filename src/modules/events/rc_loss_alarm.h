@@ -39,10 +39,11 @@
 
 #pragma once
 
-#include "subscriber_handler.h"
-
-#include <uORB/uORB.h>
+#include <uORB/Publication.hpp>
+#include <uORB/Subscription.hpp>
 #include <uORB/topics/vehicle_status.h>
+#include <uORB/topics/failsafe_flags.h>
+#include <uORB/topics/tune_control.h>
 
 namespace events
 {
@@ -53,26 +54,25 @@ class RC_Loss_Alarm
 {
 public:
 
-	RC_Loss_Alarm(const events::SubscriberHandler &subscriber_handler);
+	RC_Loss_Alarm() = default;
 
 	/** regularily called to handle state updates */
 	void process();
 
 private:
-	/**
-	 * check for topic updates
-	 * @return true if one or more topics got updated
-	 */
-	bool check_for_updates();
-
 	/** Publish tune control to sound alarm */
 	void play_tune();
 
-	struct vehicle_status_s	_vehicle_status = {};
+	/** Publish tune control to interrupt any sound */
+	void stop_tune();
+
+	uORB::Publication<tune_control_s> _tune_control_pub{ORB_ID(tune_control)};
+	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
+	uORB::Subscription _failsafe_flags_sub{ORB_ID(failsafe_flags)};
+
 	bool 		_was_armed = false;
-	bool 		_had_rc = false;  // Don't trigger alarm for systems without RC
-	orb_advert_t 	_tune_control_pub = nullptr;
-	const events::SubscriberHandler &_subscriber_handler;
+	bool 		_had_manual_control = false;  // Don't trigger alarm for systems without RC
+	bool		_alarm_playing = false;
 };
 
 } /* namespace rc_loss */

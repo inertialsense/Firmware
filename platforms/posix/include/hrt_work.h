@@ -31,10 +31,10 @@
  *
  ****************************************************************************/
 
-#include <px4_log.h>
-#include <px4_posix.h>
+#include <px4_platform_common/log.h>
+#include <px4_platform_common/posix.h>
 #include <semaphore.h>
-#include <px4_workqueue.h>
+#include <px4_platform_common/workqueue.h>
 
 #pragma once
 
@@ -48,13 +48,13 @@ int hrt_work_queue(struct work_s *work, worker_t worker, void *arg, uint32_t usd
 void hrt_work_cancel(struct work_s *work);
 
 static inline void hrt_work_lock(void);
-static inline void hrt_work_lock()
+static inline void hrt_work_lock(void)
 {
 	px4_sem_wait(&_hrt_work_lock);
 }
 
 static inline void hrt_work_unlock(void);
-static inline void hrt_work_unlock()
+static inline void hrt_work_unlock(void)
 {
 	px4_sem_post(&_hrt_work_lock);
 }

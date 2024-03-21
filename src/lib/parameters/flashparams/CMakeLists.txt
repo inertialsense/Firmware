@@ -31,11 +31,23 @@
 #
 ############################################################################
 
+if(CONFIG_ARCH_CHIP_STM32H7)
+	set(FLASHFS_SOURCE_FILE flashfs32.c)
+else()
+	set(FLASHFS_SOURCE_FILE flashfs.c)
+endif()
+
 add_library(flashparams
-	flashfs.c
+	${FLASHFS_SOURCE_FILE}
 	flashparams.cpp
 )
-add_dependencies(flashparams prebuild_targets)
+
+add_dependencies(flashparams prebuild_targets parameters_header)
 target_compile_definitions(flashparams PRIVATE -DMODULE_NAME="flashparams")
-target_compile_options(flashparams PRIVATE -Wno-sign-compare) # TODO: fix this
+target_compile_options(flashparams
+	PRIVATE
+		-Wno-sign-compare # TODO: fix this
+		-Wno-cast-align # TODO: fix and enable
+)
+
 target_link_libraries(flashparams PRIVATE nuttx_arch)

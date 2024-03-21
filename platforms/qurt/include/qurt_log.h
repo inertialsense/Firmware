@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- * Copyright (C) 2015 Mark Charlebois. All rights reserved.
+ * Copyright (C) 2022-2023 ModalAI, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,25 +30,20 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
 #pragma once
 
-#include <sys/cdefs.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <px4_platform_common/defines.h>
 
 __BEGIN_DECLS
 
-__EXPORT extern uint64_t hrt_absolute_time(void);
+extern void qurt_log_to_apps(int level, const char *message);
 
-//void qurt_log(int level, const char *file, int line, const char *format, ...);
-
-// declaration to make the compiler happy.  This symbol is part of the adsp static image.
+// Defining hap_debug
 void HAP_debug(const char *msg, int level, const char *filename, int line);
 
-#ifndef qurt_log_defined
-#define qurt_log_defined
 static __inline void qurt_log(int level, const char *file, int line,
 			      const char *format, ...)
 {
@@ -58,7 +53,18 @@ static __inline void qurt_log(int level, const char *file, int line,
 	vsnprintf(buf, sizeof(buf), format, args);
 	va_end(args);
 	HAP_debug(buf, level, file, line);
+
+	qurt_log_to_apps(level, buf);
 }
-#endif
+
+static __inline void qurt_log_raw(const char *format, ...)
+{
+	char buf[256];
+	va_list args;
+	va_start(args, format);
+	vsnprintf(buf, sizeof(buf), format, args);
+	va_end(args);
+	qurt_log_to_apps(1, buf);
+}
 
 __END_DECLS

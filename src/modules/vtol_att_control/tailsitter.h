@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2015 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2015-2023 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,54 +43,54 @@
 #define TAILSITTER_H
 
 #include "vtol_type.h"
-#include <perf/perf_counter.h>  /** is it necsacery? **/
+
 #include <parameters/param.h>
 #include <drivers/drv_hrt.h>
+#include <matrix/matrix/math.hpp>
+
+// [rad] Pitch threshold required for completing transition to fixed-wing in automatic transitions
+static constexpr float PITCH_THRESHOLD_AUTO_TRANSITION_TO_FW = -1.05f; // -60°
+
+// [rad] Pitch threshold required for completing transition to hover in automatic transitions
+static constexpr float PITCH_THRESHOLD_AUTO_TRANSITION_TO_MC = -0.26f; // -15°
 
 class Tailsitter : public VtolType
 {
 
 public:
 	Tailsitter(VtolAttitudeControl *_att_controller);
-	~Tailsitter() = default;
+	~Tailsitter() override = default;
 
-	virtual void update_vtol_state();
-	virtual void update_transition_state();
-	virtual void update_mc_state();
-	virtual void update_fw_state();
-	virtual void fill_actuator_outputs();
-	virtual void waiting_on_tecs();
+	void update_vtol_state() override;
+	void update_transition_state() override;
+	void update_fw_state() override;
+	void fill_actuator_outputs() override;
+	void waiting_on_tecs() override;
 
 private:
-
-	struct {
-		float front_trans_dur_p2;
-	} _params_tailsitter;
-
-	struct {
-		param_t front_trans_dur_p2;
-	} _params_handles_tailsitter;
-
-	enum vtol_mode {
+	enum class vtol_mode {
 		MC_MODE = 0,			/**< vtol is in multicopter mode */
 		TRANSITION_FRONT_P1,	/**< vtol is in front transition part 1 mode */
 		TRANSITION_BACK,		/**< vtol is in back transition mode */
 		FW_MODE					/**< vtol is in fixed wing mode */
 	};
 
-	struct {
-		vtol_mode flight_mode;			/**< vtol flight mode, defined by enum vtol_mode */
-		hrt_abstime transition_start;	/**< absoulte time at which front transition started */
-	} _vtol_schedule;
+	vtol_mode _vtol_mode{vtol_mode::MC_MODE};			/**< vtol flight mode, defined by enum vtol_mode */
 
-	float _thrust_transition_start; // throttle value when we start the front transition
-	float _yaw_transition;	// yaw angle in which transition will take place
-	float _pitch_transition_start;  // pitch angle at the start of transition (tailsitter)
+	bool _flag_was_in_trans_mode = false;	// true if mode has just switched to transition
 
-	/**
-	 * Update parameters.
-	 */
-	virtual void parameters_update();
+	matrix::Quatf _q_trans_start;
+	matrix::Quatf _q_trans_sp;
+	matrix::Vector3f _trans_rot_axis;
+
+	void parameters_update() override;
+
+	bool isFrontTransitionCompletedBase() override;
+
+	DEFINE_PARAMETERS_CUSTOM_PARENT(VtolType,
+					(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off
+				       )
+
 
 };
 #endif

@@ -33,7 +33,6 @@
 px4_add_module(
 	MODULE modules__land_detector
 	MAIN land_detector
-	STACK_MAIN 1200
 	COMPILE_FLAGS
 	SRCS
 		land_detector_main.cpp
@@ -42,6 +41,8 @@ px4_add_module(
 		FixedwingLandDetector.cpp
 		VtolLandDetector.cpp
 		RoverLandDetector.cpp
+		AirshipLandDetector.cpp
 	DEPENDS
+		hysteresis
 	)
 

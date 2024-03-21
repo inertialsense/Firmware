@@ -1,7 +1,50 @@
+/****************************************************************************
+ *
+ *  Copyright (C) 2012-2019 PX4 Development Team. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name PX4 nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
+
+/**
+ * @file test_parameters.cpp
+ * Tests related to the parameter system.
+ */
+
 #include <unit_test.h>
 
-#include <px4_defines.h>
+#include <px4_platform_common/defines.h>
+#include <lib/parameters/param.h>
+
+#include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <math.h>
 
 class ParameterTest : public UnitTest
 {
@@ -37,6 +80,7 @@ private:
 	bool ResetAllExcludesTwo();
 	bool ResetAllExcludesBoundaryCheck();
 	bool ResetAllExcludesWildcard();
+	bool CustomDefaults();
 	bool exportImport();
 
 	// tests on system parameters
@@ -180,6 +224,50 @@ bool ParameterTest::ResetAllExcludesWildcard()
 	return ret;
 }
 
+bool ParameterTest::CustomDefaults()
+{
+	int32_t value = 0;
+	param_t param_test_1 = param_find("TEST_1");
+	param_reset(param_test_1);
+	param_get(param_test_1, &value);
+	ut_compare("value for param doesn't match default value", value, 2); // TEST_1 default value 2
+
+	// verify underlying default value
+	int32_t default_value = 0;
+	param_get_default_value(param_test_1, &default_value);
+	ut_compare("value for param default doesn't match default value", default_value, 2);
+
+	// change default value
+	int32_t new_default_value = 123456789;
+	param_set_default_value(param_test_1, &new_default_value);
+	ut_compare("value for param default doesn't match default value", new_default_value, 123456789);
+
+	// verify new default value
+	default_value = 0;
+	param_get_default_value(param_test_1, &default_value);
+	ut_compare("value for param default doesn't match custom default value", default_value, 123456789);
+
+	// verify new value
+	value = 0;
+	param_get(param_test_1, &value);
+	ut_compare("param value not custom default", value, 123456789);
+
+	// set to new value and verify
+	value = 987654321;
+	param_set(param_test_1, &value);
+	value = 0;
+	param_get(param_test_1, &value);
+	ut_compare("param value not saved", value, 987654321);
+
+	// reset (to custom default)
+	param_reset(param_test_1);
+	value = 0;
+	param_get(param_test_1, &value);
+	ut_compare("param value not reset to custom default", value, 123456789);
+
+	return true;
+}
+
 bool ParameterTest::exportImport()
 {
 	static constexpr float MAGIC_FLOAT_VAL = 0.314159f;
@@ -228,7 +316,7 @@ bool ParameterTest::exportImport()
 	}
 
 	// save
-	if (param_save_default() != PX4_OK) {
+	if (param_save_default(true) != PX4_OK) {
 		PX4_ERR("param_save_default failed");
 		return false;
 	}
@@ -313,22 +401,13 @@ bool ParameterTest::exportImportAll()
 
 	// backup current parameters
 	const char *param_file_name = PX4_STORAGEDIR "/param_backup";
-	int fd = open(param_file_name, O_WRONLY | O_CREAT, PX4_O_MODE_666);
 
-	if (fd < 0) {
-		PX4_ERR("open '%s' failed (%i)", param_file_name, errno);
-		return false;
-	}
-
-	int result = param_export(fd, false);
+	int result = param_export(param_file_name, nullptr);
 
 	if (result != PX4_OK) {
 		PX4_ERR("param_export failed");
-		close(fd);
 		return false;
 	}
-
-	close(fd);
 
 	bool ret = true;
 
@@ -382,7 +461,7 @@ bool ParameterTest::exportImportAll()
 	}
 
 	// save
-	if (param_save_default() != PX4_OK) {
+	if (param_save_default(true) != PX4_OK) {
 		PX4_ERR("param_save_default failed");
 		return false;
 	}
@@ -466,7 +545,7 @@ bool ParameterTest::exportImportAll()
 	param_reset_all();
 
 	// restore original params
-	fd = open(param_file_name, O_RDONLY);
+	int fd = open(param_file_name, O_RDONLY);
 
 	if (fd < 0) {
 		PX4_ERR("open '%s' failed (%i)", param_file_name, errno);
@@ -482,7 +561,7 @@ bool ParameterTest::exportImportAll()
 	}
 
 	// save
-	if (param_save_default() != PX4_OK) {
+	if (param_save_default(true) != PX4_OK) {
 		PX4_ERR("param_save_default failed");
 		return false;
 	}
@@ -501,6 +580,7 @@ bool ParameterTest::run_tests()
 	ut_run_test(ResetAllExcludesTwo);
 	ut_run_test(ResetAllExcludesBoundaryCheck);
 	ut_run_test(ResetAllExcludesWildcard);
+	ut_run_test(CustomDefaults);
 	ut_run_test(exportImport);
 
 	// WARNING, can potentially trash your system

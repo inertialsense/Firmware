@@ -37,7 +37,8 @@
  */
 
 #include "terrain_estimator.h"
-#include <lib/ecl/geo/geo.h>
+#include <lib/geo/geo.h>
+#include <px4_platform_common/defines.h>
 
 #define DISTANCE_TIMEOUT 100000		// time in usec after which laser is considered dead
 
@@ -47,7 +48,7 @@ TerrainEstimator::TerrainEstimator() :
 	_time_last_distance(0),
 	_time_last_gps(0)
 {
-	memset(&_x._data[0], 0, sizeof(_x._data));
+	_x.zero();
 	_u_z = 0.0f;
 	_P.setIdentity();
 }
@@ -96,7 +97,7 @@ void TerrainEstimator::predict(float dt, const struct vehicle_attitude_s *attitu
 	       B * R * B.transpose() + Q) * dt;
 }
 
-void TerrainEstimator::measurement_update(uint64_t time_ref, const struct vehicle_gps_position_s *gps,
+void TerrainEstimator::measurement_update(uint64_t time_ref, const struct sensor_gps_s *gps,
 		const struct distance_sensor_s *distance,
 		const struct vehicle_attitude_s *attitude)
 {
@@ -168,24 +169,8 @@ void TerrainEstimator::measurement_update(uint64_t time_ref, const struct vehicl
 	}
 
 	// reinitialise filter if we find bad data
-	bool reinit = false;
-
-	for (int i = 0; i < n_x; i++) {
-		if (!PX4_ISFINITE(_x(i))) {
-			reinit = true;
-		}
-	}
-
-	for (int i = 0; i < n_x; i++) {
-		for (int j = 0; j < n_x; j++) {
-			if (!PX4_ISFINITE(_P(i, j))) {
-				reinit = true;
-			}
-		}
-	}
-
-	if (reinit) {
-		memset(&_x._data[0], 0, sizeof(_x._data));
+	if (!_x.isAllFinite() || !_P.isAllFinite()) {
+		_x.zero();
 		_P.setZero();
 		_P(0, 0) = _P(1, 1) = _P(2, 2) = 0.1f;
 	}

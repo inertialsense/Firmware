@@ -1,7 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013 PX4 Development Team. All rights reserved.
- *   Author: Anton Babushkin <anton.babushkin@me.com>
+ *   Copyright (c) 2013-2019 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -43,18 +42,9 @@
 
 #pragma once
 
-#include <px4_config.h>
+#include <px4_platform_common/px4_config.h>
 #include <systemlib/px4_macros.h>
 #include <stdint.h>
-
-/* The preferred method for publishing a board name is to
- * define it in board_config.h as BOARD_NAME
- */
-
-#ifndef BOARD_NAME
-#  error "board_config.h must define BOARD_NAME"
-#endif
-
 
 __BEGIN_DECLS
 
@@ -63,7 +53,15 @@ __BEGIN_DECLS
  */
 static inline const char *px4_board_name(void)
 {
-	return BOARD_NAME;
+	return PX4_BOARD_NAME;
+}
+
+/**
+ * get the board build target variant
+ */
+static inline const char *px4_board_target_label(void)
+{
+	return PX4_BOARD_LABEL;
 }
 
 /**
@@ -90,6 +88,16 @@ static inline int px4_board_hw_revision(void)
 	return board_get_hw_revision();
 }
 
+#if defined(BOARD_HAS_HW_SPLIT_VERSIONING)
+/**
+ * get the base board type
+ */
+static inline const char *px4_board_base_type(void)
+{
+	return board_get_hw_base_type_name();
+}
+#endif
+
 /**
  * get the build URI (used for crash logging)
  */
@@ -99,8 +107,9 @@ const char *px4_build_uri(void);
  * Convert a version tag string to a number
  * @param tag version tag in one of the following forms:
  *            - vendor: v1.4.0-0.2.0
- *            - dev: v1.4.0rc3-7-g7e282f57
- *            - rc: v1.4.0rc4
+ *            - dev: v1.4.0-rc3-7-g7e282f57
+ *            - rc: v1.4.0-rc4
+ *            - beta: v1.4.0-beta1
  *            - release: v1.4.0
  *            - linux: 7.9.3
  * @return version in the form 0xAABBCCTT (AA: Major, BB: Minor, CC: Patch, TT Type @see FIRMWARE_TYPE)
@@ -117,8 +126,9 @@ __EXPORT uint32_t px4_firmware_version(void);
  * Convert a version tag string to a vendor version number
  * @param tag version tag in one of the following forms:
  *            - vendor: v1.4.0-0.2.0
- *            - dev: v1.4.0rc3-7-g7e282f57
- *            - rc: v1.4.0rc4
+ *            - dev: v1.4.0-rc3-7-g7e282f57
+ *            - rc: v1.4.0-rc4
+ *            - beta: v1.4.0-beta1
  *            - release: v1.4.0
  *            - linux: 7.9.3
  * @return version in the form 0xAABBCCTT (AA: Major, BB: Minor, CC: Patch, TT Type @see FIRMWARE_TYPE)
@@ -180,11 +190,6 @@ __EXPORT const char *px4_firmware_git_branch(void);
 __EXPORT uint64_t px4_firmware_version_binary(void);
 
 /**
- * ECL lib version as human readable string (git tag)
- */
-__EXPORT const char *px4_ecl_lib_version_string(void);
-
-/**
  * MAVLink lib version in binary form (first part of the git tag)
  */
 __EXPORT uint64_t px4_mavlink_lib_version_binary(void);
@@ -194,6 +199,11 @@ __EXPORT uint64_t px4_mavlink_lib_version_binary(void);
  * @return this is not available on all OSes and can return 0
  */
 __EXPORT uint64_t px4_os_version_binary(void);
+
+/**
+ * get the git oem version tag (can be empty, no particular format)
+ */
+__EXPORT const char *px4_firmware_oem_version_string(void);
 
 __END_DECLS
 

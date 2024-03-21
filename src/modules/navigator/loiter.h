@@ -43,7 +43,7 @@
 #include "navigator_mode.h"
 #include "mission_block.h"
 
-#include <px4_module_params.h>
+#include <px4_platform_common/module_params.h>
 
 class Loiter : public MissionBlock, public ModuleParams
 {
@@ -51,18 +51,8 @@ public:
 	Loiter(Navigator *navigator);
 	~Loiter() = default;
 
-	void on_inactive() override;
 	void on_activation() override;
 	void on_active() override;
-
-	// TODO: share this with mission
-	enum mission_yaw_mode {
-		MISSION_YAWMODE_NONE = 0,
-		MISSION_YAWMODE_FRONT_TO_WAYPOINT = 1,
-		MISSION_YAWMODE_FRONT_TO_HOME = 2,
-		MISSION_YAWMODE_BACK_TO_HOME = 3,
-		MISSION_YAWMODE_MAX = 4
-	};
 
 private:
 	/**
@@ -76,5 +66,4 @@ private:
 	 */
 	void set_loiter_position();
 
-	bool _loiter_pos_set{false};
 };

@@ -34,11 +34,9 @@ px4_add_module(
 	MODULE modules__local_position_estimator
 	MAIN local_position_estimator
 	COMPILE_FLAGS
-		-Wno-double-promotion # TODO: fix in Matrix library Vector::pow()
 	STACK_MAIN 5700
-	STACK_MAX 13000
+	STACK_MAX 3700
 	SRCS
-		local_position_estimator_main.cpp
 		BlockLocalPositionEstimator.cpp
 		sensors/flow.cpp
 		sensors/lidar.cpp
@@ -51,6 +49,6 @@ px4_add_module(
 		sensors/landing_target.cpp
 	DEPENDS
 		controllib
-		git_ecl
-		ecl_geo
+		geo
+		px4_work_queue
 	)

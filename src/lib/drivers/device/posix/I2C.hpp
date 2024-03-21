@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2016-2021 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,23 +31,20 @@
  *
  ****************************************************************************/
 
+#pragma once
+
 /**
- * @file i2c.h
+ * @file I2C.hpp
  *
  * Base class for devices connected via I2C.
  */
 
-#ifndef _DEVICE_I2C_H
-#define _DEVICE_I2C_H
-
 #include "../CDev.hpp"
+#include <px4_platform_common/i2c.h>
 
-#include <px4_i2c.h>
+#if defined(CONFIG_I2C)
 
-#ifdef __PX4_LINUX
-#include <linux/i2c.h>
-#include <linux/i2c-dev.h>
-#endif
+struct I2CSPIDriverConfig;
 
 namespace device __EXPORT
 {
@@ -60,6 +57,14 @@ class __EXPORT I2C : public CDev
 
 public:
 
+	// no copy, assignment, move, move assignment
+	I2C(const I2C &) = delete;
+	I2C &operator=(const I2C &) = delete;
+	I2C(I2C &&) = delete;
+	I2C &operator=(I2C &&) = delete;
+
+	virtual int	init() override;
+
 protected:
 	/**
 	 * The number of times a read or write operation will be retried on
@@ -70,16 +75,15 @@ protected:
 	/**
 	 * @ Constructor
 	 *
+	 * @param device_type	The device type (see drv_sensor.h)
 	 * @param name		Driver name
-	 * @param devname	Device node name
 	 * @param bus		I2C bus on which the device lives
 	 * @param address	I2C bus address, or zero if set_address will be used
 	 * @param frequency	I2C bus frequency for the device (currently not used)
 	 */
-	I2C(const char *name, const char *devname, int bus, uint16_t address, uint32_t frequency = 0);
+	I2C(uint8_t device_type, const char *name, const int bus, const uint16_t address, const uint32_t frequency);
+	I2C(const I2CSPIDriverConfig &config);
 	virtual ~I2C();
-
-	virtual int	init();
 
 	/**
 	 * Check for the presence of the device on the bus.
@@ -98,17 +102,15 @@ protected:
 	 * @return		OK if the transfer was successful, -errno
 	 *			otherwise.
 	 */
-	int		transfer(const uint8_t *send, unsigned send_len, uint8_t *recv, unsigned recv_len);
+	int		transfer(const uint8_t *send, const unsigned send_len, uint8_t *recv, const unsigned recv_len);
 
-	bool		external() { return px4_i2c_bus_external(_device_id.devid_s.bus); }
+	virtual bool	external() const override { return px4_i2c_device_external(_device_id.devid); }
 
 private:
-	int 			_fd{-1};
+	int			_fd{-1};
 
-	I2C(const device::I2C &);
-	I2C operator=(const device::I2C &);
 };
 
 } // namespace device
 
-#endif /* _DEVICE_I2C_H */
+#endif // CONFIG_I2C

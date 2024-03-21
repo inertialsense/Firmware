@@ -55,7 +55,7 @@ public:
 	static constexpr Backend BackendMavlink = 1 << 1;
 	static constexpr Backend BackendAll = BackendFile | BackendMavlink;
 
-	LogWriter(Backend configured_backend, size_t file_buffer_size, unsigned int queue_size);
+	LogWriter(Backend configured_backend, size_t file_buffer_size);
 	~LogWriter();
 
 	bool init();
@@ -65,9 +65,11 @@ public:
 	/** stop all running threads and wait for them to exit */
 	void thread_stop();
 
-	void start_log_file(const char *filename);
+	bool start_log_file(LogType type, const char *filename);
 
-	void stop_log_file();
+	void stop_log_file(LogType type);
+
+	bool had_file_write_error() const;
 
 	void start_log_mavlink();
 
@@ -76,20 +78,21 @@ public:
 	/**
 	 * whether logging is currently active or not (any of the selected backends).
 	 */
-	bool is_started() const;
+	bool is_started(LogType type) const;
 
 	/**
 	 * whether logging is currently active or not for a specific backend.
 	 */
-	bool is_started(Backend query_backend) const;
+	bool is_started(LogType type, Backend query_backend) const;
 
 	/**
 	 * Write a single ulog message (including header). The caller must call lock() before calling this.
 	 * @param dropout_start timestamp when lastest dropout occured. 0 if no dropout at the moment.
 	 * @return 0 on success (or if no logging started),
 	 *         -1 if not enough space in the buffer left (file backend), -2 mavlink backend failed
+	 *  add type -> pass through, but not to mavlink if mission log
 	 */
-	int write_message(void *ptr, size_t size, uint64_t dropout_start = 0);
+	int write_message(LogType type, void *ptr, size_t size, uint64_t dropout_start = 0);
 
 	/**
 	 * Select a backend, so that future calls to write_message() only write to the selected
@@ -116,23 +119,23 @@ public:
 		if (_log_writer_file) { _log_writer_file->notify(); }
 	}
 
-	size_t get_total_written_file() const
+	size_t get_total_written_file(LogType type) const
 	{
-		if (_log_writer_file) { return _log_writer_file->get_total_written(); }
+		if (_log_writer_file) { return _log_writer_file->get_total_written(type); }
 
 		return 0;
 	}
 
-	size_t get_buffer_size_file() const
+	size_t get_buffer_size_file(LogType type) const
 	{
-		if (_log_writer_file) { return _log_writer_file->get_buffer_size(); }
+		if (_log_writer_file) { return _log_writer_file->get_buffer_size(type); }
 
 		return 0;
 	}
 
-	size_t get_buffer_fill_count_file() const
+	size_t get_buffer_fill_count_file(LogType type) const
 	{
-		if (_log_writer_file) { return _log_writer_file->get_buffer_fill_count(); }
+		if (_log_writer_file) { return _log_writer_file->get_buffer_fill_count(type); }
 
 		return 0;
 	}
@@ -149,11 +152,11 @@ public:
 	 * Indicate to the underlying backend whether future write_message() calls need a reliable
 	 * transfer. Needed for header integrity.
 	 */
-	void set_need_reliable_transfer(bool need_reliable)
+	void set_need_reliable_transfer(bool need_reliable, bool mavlink_backed_too = true)
 	{
 		if (_log_writer_file) { _log_writer_file->set_need_reliable_transfer(need_reliable); }
 
-		if (_log_writer_mavlink) { _log_writer_mavlink->set_need_reliable_transfer(need_reliable); }
+		if (_log_writer_mavlink) { _log_writer_mavlink->set_need_reliable_transfer(need_reliable && mavlink_backed_too); }
 	}
 
 	bool need_reliable_transfer() const
@@ -165,6 +168,12 @@ public:
 		return false;
 	}
 
+#if defined(PX4_CRYPTO)
+	void set_encryption_parameters(px4_crypto_algorithm_t algorithm, uint8_t key_idx,  uint8_t exchange_key_idx)
+	{
+		if (_log_writer_file) { _log_writer_file->set_encryption_parameters(algorithm, key_idx, exchange_key_idx); }
+	}
+#endif
 private:
 
 	LogWriterFile *_log_writer_file = nullptr;

@@ -43,25 +43,36 @@
 
 #include "mavlink_stream.h"
 
+#define DEFINE_GET_PX4_CUSTOM_MODE
+#include <commander/px4_custom_mode.h>
+
 class StreamListItem
 {
 
 public:
 	MavlinkStream *(*new_instance)(Mavlink *mavlink);
-	const char *(*get_name)();
-	uint16_t (*get_id)();
+	const char *name;
+	uint16_t id;
 
-	StreamListItem(MavlinkStream * (*inst)(Mavlink *mavlink), const char *(*name)(), uint16_t (*id)()) :
+	StreamListItem(MavlinkStream * (*inst)(Mavlink *mavlink), const char *_name, uint16_t _id) :
 		new_instance(inst),
-		get_name(name),
-		get_id(id) {}
+		name(_name),
+		id(_id) {}
 
+	const char *get_name() const { return name; }
+	uint16_t get_id() const { return id; }
 };
 
+template <class T>
+static StreamListItem create_stream_list_item()
+{
+	return StreamListItem(&T::new_instance, T::get_name_static(), T::get_id_static());
+}
+
 const char *get_stream_name(const uint16_t msg_id);
+
 MavlinkStream *create_mavlink_stream(const char *stream_name, Mavlink *mavlink);
 
-void get_mavlink_navigation_mode(const struct vehicle_status_s *const status, uint8_t *mavlink_base_mode,
-				 union px4_custom_mode *custom_mode);
+MavlinkStream *create_mavlink_stream(const uint16_t msg_id, Mavlink *mavlink);
 
 #endif /* MAVLINK_MESSAGES_H_ */

@@ -39,7 +39,7 @@
 
 #pragma once
 
-#include <px4_defines.h>
+#include <px4_platform_common/defines.h>
 #include <assert.h>
 #include <time.h>
 #include <stdlib.h>
@@ -69,7 +69,7 @@ public:
 		_fs(sample_freq),
 		_lp(_fs, _fCut.get())
 	{}
-	virtual ~BlockLowPass2() {}
+	virtual ~BlockLowPass2() = default;
 	float update(float input);
 // accessors
 	float getState() { return _state; }
@@ -80,7 +80,7 @@ protected:
 	float _state;
 	control::BlockParamFloat _fCut;
 	float _fs;
-	math::LowPassFilter2p _lp;
+	math::LowPassFilter2p<float> _lp;
 };
 
 } // namespace control

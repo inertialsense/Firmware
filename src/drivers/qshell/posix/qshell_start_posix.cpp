@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2016 PX4 Development Team. All rights reserved.
+ * Copyright (C) 2022 ModalAI, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,17 +31,10 @@
  *
  ****************************************************************************/
 
-/**
- * @file qshell_start_posix.cpp
- * Send shell commands to qurt
- *
- * @author Nicolas de Palezieux <ndepal@gmail.com>
- */
-
 #include "qshell.h"
-#include <px4_log.h>
-#include <px4_app.h>
-#include <px4_tasks.h>
+#include <px4_platform_common/log.h>
+#include <px4_platform_common/app.h>
+#include <px4_platform_common/tasks.h>
 #include <stdio.h>
 #include <string.h>
 #include <sched.h>
@@ -57,6 +50,7 @@ static void usage()
 {
 	PX4_DEBUG("usage: qshell cmd [args]");
 }
+
 int qshell_main(int argc, char *argv[])
 {
 	if (argc < 2) {

@@ -43,14 +43,22 @@
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_led.h>
+#include <px4_platform_common/module_params.h>
+#include <lib/parameters/param.h>
+#include <lib/perf/perf_counter.h>
+#include <uORB/Subscription.hpp>
+#include <uORB/SubscriptionInterval.hpp>
+#include <uORB/topics/led_control.h>
+#include <uORB/topics/parameter_update.h>
 
+using namespace time_literals;
 
 struct LedControlDataSingle {
-	uint8_t color; ///< one of led_control_s::COLOR_*
-	uint8_t brightness; ///< brightness in [0, 255]
+	uint8_t color{led_control_s::COLOR_OFF}; ///< one of led_control_s::COLOR_*
+	uint8_t brightness{0}; ///< brightness in [0, 255]
 };
 struct LedControlData {
-	LedControlDataSingle leds[BOARD_MAX_LEDS];
+	LedControlDataSingle leds[BOARD_MAX_LEDS] {};
 };
 
 
@@ -58,26 +66,17 @@ struct LedControlData {
  ** class LedController
  * Handles the led_control topic: blinking, priorities and state updates.
  */
-class LedController
+class LedController : public ModuleParams
 {
 public:
-	LedController() = default;
-	~LedController() = default;
+	LedController() : ModuleParams(nullptr) {}
+	~LedController() override
+	{
+		perf_free(_led_control_sub_lost_perf);
+	}
 
 	/**
-	 * initialize. Call this once before using the object
-	 * @param led_control_sub uorb subscription for led_control
-	 * @return 0 on success, <0 on error otherwise
-	 */
-	int init(int led_control_sub);
-
-	/**
-	 * check if already initialized
-	 */
-	bool is_init() const { return _led_control_sub >= 0; }
-
-	/**
-	 * get maxium time between two consecutive calls to update() in us.
+	 * get maximum time between two consecutive calls to update() in us.
 	 */
 	int maximum_update_interval() const
 	{
@@ -92,17 +91,15 @@ public:
 	 */
 	int update(LedControlData &control_data);
 
-	static const int BREATHE_INTERVAL = 25 * 1000; /**< single step when in breathe mode */
-	static const int BREATHE_STEPS = 64; /**< number of steps in breathe mode for a full on-off cycle */
+	static constexpr int BREATHE_INTERVAL = 25 * 1000; /**< single step when in breathe mode */
+	static constexpr int BREATHE_STEPS = 64; /**< number of steps in breathe mode for a full on-off cycle */
 
-	static const int BLINK_FAST_DURATION = 100 * 1000; /**< duration of half a blinking cycle
+	static constexpr int BLINK_FAST_DURATION = 100 * 1000; /**< duration of half a blinking cycle
 									(on-to-off and off-to-on) in us */
-	static const int BLINK_NORMAL_DURATION = 500 * 1000; /**< duration of half a blinking cycle
+	static constexpr int BLINK_NORMAL_DURATION = 500 * 1000; /**< duration of half a blinking cycle
 									(on-to-off and off-to-on) in us */
-	static const int BLINK_SLOW_DURATION = 2000 * 1000; /**< duration of half a blinking cycle
+	static constexpr int BLINK_SLOW_DURATION = 2000 * 1000; /**< duration of half a blinking cycle
 									(on-to-off and off-to-on) in us */
-
-	int led_control_subscription() const { return _led_control_sub; }
 
 private:
 
@@ -160,8 +157,6 @@ private:
 				// handle infinite case
 				priority[next_priority].blink_times_left = 246;
 			}
-
-
 		}
 
 		void apply_next_state()
@@ -186,8 +181,19 @@ private:
 
 	PerLedData _states[BOARD_MAX_LEDS]; ///< keep current LED states
 
-	int _led_control_sub = -1; ///< uorb subscription
-	hrt_abstime _last_update_call;
-	bool _force_update = true; ///< force an orb_copy in the beginning
-	bool _breathe_enabled = false; ///< true if at least one of the led's is currently in breathe mode
+	uORB::Subscription _led_control_sub{ORB_ID(led_control)}; ///< uorb subscription
+	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
+
+	hrt_abstime _last_update_call{0};
+
+	perf_counter_t _led_control_sub_lost_perf{perf_alloc(PC_COUNT, MODULE_NAME": led_control message missed")};
+
+	uint8_t _max_brightness{UINT8_MAX};
+
+	bool _force_update{true}; ///< force an orb_copy in the beginning
+	bool _breathe_enabled{false}; ///< true if at least one of the led's is currently in breathe mode
+
+	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::SYS_RGB_MAXBRT>) _param_sys_rgb_maxbrt
+	)
 };

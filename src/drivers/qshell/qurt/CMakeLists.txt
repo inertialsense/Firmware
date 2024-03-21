@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2016 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2022 ModalAI, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -30,13 +30,12 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 ############################################################################
+
 px4_add_module(
 	MODULE drivers__qshell__qurt
 	MAIN qshell
 	SRCS
-	  qshell_main.cpp
 		qshell_start_qurt.cpp
 		qshell.cpp
 	DEPENDS
 	)
-

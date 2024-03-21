@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2017 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,53 +31,57 @@
  *
  ****************************************************************************/
 
-#include <px4_module.h>
+#pragma once
+
 #include <drivers/drv_hrt.h>
-#include <ecl/attitude_fw/ecl_pitch_controller.h>
-#include <ecl/attitude_fw/ecl_roll_controller.h>
-#include <ecl/attitude_fw/ecl_wheel_controller.h>
-#include <ecl/attitude_fw/ecl_yaw_controller.h>
-#include <lib/ecl/geo/geo.h>
-#include <mathlib/mathlib.h>
+#include "fw_pitch_controller.h"
+#include "fw_roll_controller.h"
+#include "fw_wheel_controller.h"
+#include "fw_yaw_controller.h"
+#include <lib/mathlib/mathlib.h>
+#include <lib/parameters/param.h>
+#include <lib/perf/perf_counter.h>
 #include <matrix/math.hpp>
-#include <px4_config.h>
-#include <px4_defines.h>
-#include <px4_posix.h>
-#include <px4_tasks.h>
-#include <parameters/param.h>
-#include <perf/perf_counter.h>
+#include <px4_platform_common/px4_config.h>
+#include <px4_platform_common/defines.h>
+#include <px4_platform_common/module.h>
+#include <px4_platform_common/module_params.h>
+#include <px4_platform_common/posix.h>
+#include <px4_platform_common/tasks.h>
+#include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
+#include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
-#include <uORB/topics/actuator_controls.h>
-#include <uORB/topics/airspeed.h>
-#include <uORB/topics/battery_status.h>
+#include <uORB/SubscriptionCallback.hpp>
+#include <uORB/topics/airspeed_validated.h>
+#include <uORB/topics/autotune_attitude_control_status.h>
+#include <uORB/topics/landing_gear_wheel.h>
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/parameter_update.h>
-#include <uORB/topics/rate_ctrl_status.h>
+#include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_attitude_setpoint.h>
 #include <uORB/topics/vehicle_control_mode.h>
-#include <uORB/topics/vehicle_global_position.h>
+#include <uORB/topics/vehicle_local_position.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/vehicle_rates_setpoint.h>
 #include <uORB/topics/vehicle_status.h>
-#include <vtol_att_control/vtol_type.h>
 
 using matrix::Eulerf;
 using matrix::Quatf;
 
-using uORB::Subscription;
+using uORB::SubscriptionData;
 
-class FixedwingAttitudeControl final : public ModuleBase<FixedwingAttitudeControl>
+using namespace time_literals;
+
+class FixedwingAttitudeControl final : public ModuleBase<FixedwingAttitudeControl>, public ModuleParams,
+	public px4::ScheduledWorkItem
 {
 public:
-	FixedwingAttitudeControl();
+	FixedwingAttitudeControl(bool vtol = false);
 	~FixedwingAttitudeControl() override;
 
 	/** @see ModuleBase */
 	static int task_spawn(int argc, char *argv[]);
-
-	/** @see ModuleBase */
-	static FixedwingAttitudeControl *instantiate(int argc, char *argv[]);
 
 	/** @see ModuleBase */
 	static int custom_command(int argc, char *argv[]);
@@ -85,215 +89,85 @@ public:
 	/** @see ModuleBase */
 	static int print_usage(const char *reason = nullptr);
 
-	/** @see ModuleBase::run() */
-	void run() override;
-
-	/** @see ModuleBase::print_status() */
-	int print_status() override;
+	bool init();
 
 private:
+	void Run() override;
 
-	int		_att_sub{-1};				/**< vehicle attitude */
-	int		_att_sp_sub{-1};			/**< vehicle attitude setpoint */
-	int		_battery_status_sub{-1};		/**< battery status subscription */
-	int		_global_pos_sub{-1};			/**< global position subscription */
-	int		_manual_sub{-1};			/**< notification of manual control updates */
-	int		_params_sub{-1};			/**< notification of parameter updates */
-	int		_vcontrol_mode_sub{-1};			/**< vehicle status subscription */
-	int		_vehicle_land_detected_sub{-1};		/**< vehicle land detected subscription */
-	int		_vehicle_status_sub{-1};		/**< vehicle status subscription */
+	uORB::SubscriptionCallbackWorkItem _att_sub{this, ORB_ID(vehicle_attitude)};		/**< vehicle attitude */
 
-	orb_advert_t	_rate_sp_pub{nullptr};			/**< rate setpoint publication */
-	orb_advert_t	_attitude_sp_pub{nullptr};		/**< attitude setpoint point */
-	orb_advert_t	_actuators_0_pub{nullptr};		/**< actuator control group 0 setpoint */
-	orb_advert_t	_actuators_2_pub{nullptr};		/**< actuator control group 1 setpoint (Airframe) */
-	orb_advert_t	_rate_ctrl_status_pub{nullptr};		/**< rate controller status publication */
+	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 
-	orb_id_t _rates_sp_id{nullptr};	// pointer to correct rates setpoint uORB metadata structure
-	orb_id_t _actuators_id{nullptr};	// pointer to correct actuator controls0 uORB metadata structure
-	orb_id_t _attitude_setpoint_id{nullptr};
+	uORB::Subscription _att_sp_sub{ORB_ID(vehicle_attitude_setpoint)};			/**< vehicle attitude setpoint */
+	uORB::Subscription _autotune_attitude_control_status_sub{ORB_ID(autotune_attitude_control_status)};
+	uORB::Subscription _local_pos_sub{ORB_ID(vehicle_local_position)};			/**< local position subscription */
+	uORB::Subscription _manual_control_setpoint_sub{ORB_ID(manual_control_setpoint)};	/**< notification of manual control updates */
+	uORB::Subscription _vehicle_control_mode_sub{ORB_ID(vehicle_control_mode)};			/**< vehicle status subscription */
+	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};		/**< vehicle land detected subscription */
+	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};				/**< vehicle status subscription */
+	uORB::Subscription _vehicle_rates_sub{ORB_ID(vehicle_angular_velocity)};
 
-	actuator_controls_s			_actuators {};		/**< actuator control inputs */
-	actuator_controls_s			_actuators_airframe {};	/**< actuator control inputs */
-	manual_control_setpoint_s		_manual {};		/**< r/c channel data */
-	vehicle_attitude_s			_att {};		/**< vehicle attitude setpoint */
-	vehicle_attitude_setpoint_s		_att_sp {};		/**< vehicle attitude setpoint */
-	vehicle_control_mode_s			_vcontrol_mode {};	/**< vehicle control mode */
-	vehicle_global_position_s		_global_pos {};		/**< global position */
-	vehicle_rates_setpoint_s		_rates_sp {};		/* attitude rates setpoint */
-	vehicle_status_s			_vehicle_status {};	/**< vehicle status */
+	uORB::SubscriptionData<airspeed_validated_s> _airspeed_validated_sub{ORB_ID(airspeed_validated)};
 
-	Subscription<airspeed_s>			_airspeed_sub;
+	uORB::Publication<vehicle_attitude_setpoint_s>	_attitude_sp_pub;
+	uORB::Publication<vehicle_rates_setpoint_s>	_rate_sp_pub{ORB_ID(vehicle_rates_setpoint)};
+	uORB::Publication<landing_gear_wheel_s>		_landing_gear_wheel_pub{ORB_ID(landing_gear_wheel)};
 
-	perf_counter_t	_loop_perf;			/**< loop performance counter */
-	perf_counter_t	_nonfinite_input_perf;		/**< performance counter for non finite input */
-	perf_counter_t	_nonfinite_output_perf;		/**< performance counter for non finite output */
+	manual_control_setpoint_s		_manual_control_setpoint{};
+	vehicle_attitude_setpoint_s		_att_sp{};
+	vehicle_control_mode_s			_vcontrol_mode{};
+	vehicle_rates_setpoint_s		_rates_sp{};
+	vehicle_status_s			_vehicle_status{};
+	landing_gear_wheel_s			_landing_gear_wheel{};
 
-	float _flaps_applied{0.0f};
-	float _flaperons_applied{0.0f};
+	matrix::Dcmf _R{matrix::eye<float, 3>()};
+
+	perf_counter_t _loop_perf;
+
+	hrt_abstime _last_run{0};
 
 	bool _landed{true};
+	float _groundspeed{0.f};
+	bool _in_fw_or_transition_wo_tailsitter_transition{false}; // only run the FW attitude controller in these states
 
-	float _battery_scale{1.0f};
+	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::FW_AIRSPD_MAX>) _param_fw_airspd_max,
+		(ParamFloat<px4::params::FW_AIRSPD_MIN>) _param_fw_airspd_min,
+		(ParamFloat<px4::params::FW_AIRSPD_STALL>) _param_fw_airspd_stall,
+		(ParamFloat<px4::params::FW_AIRSPD_TRIM>) _param_fw_airspd_trim,
+		(ParamBool<px4::params::FW_USE_AIRSPD>) _param_fw_use_airspd,
 
-	bool _flag_control_attitude_enabled_last{false};
+		(ParamFloat<px4::params::FW_MAN_P_MAX>) _param_fw_man_p_max,
+		(ParamFloat<px4::params::FW_MAN_R_MAX>) _param_fw_man_r_max,
 
-	struct {
-		float p_tc;
-		float p_p;
-		float p_i;
-		float p_ff;
-		float p_rmax_pos;
-		float p_rmax_neg;
-		float p_integrator_max;
-		float r_tc;
-		float r_p;
-		float r_i;
-		float r_ff;
-		float r_integrator_max;
-		float r_rmax;
-		float y_p;
-		float y_i;
-		float y_ff;
-		float y_integrator_max;
-		float roll_to_yaw_ff;
-		float y_rmax;
+		(ParamFloat<px4::params::FW_P_RMAX_NEG>) _param_fw_p_rmax_neg,
+		(ParamFloat<px4::params::FW_P_RMAX_POS>) _param_fw_p_rmax_pos,
+		(ParamFloat<px4::params::FW_P_TC>) _param_fw_p_tc,
+		(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off,
 
-		bool w_en;
-		float w_p;
-		float w_i;
-		float w_ff;
-		float w_integrator_max;
-		float w_rmax;
+		(ParamFloat<px4::params::FW_R_RMAX>) _param_fw_r_rmax,
+		(ParamFloat<px4::params::FW_R_TC>) _param_fw_r_tc,
 
-		float airspeed_min;
-		float airspeed_trim;
-		float airspeed_max;
+		(ParamBool<px4::params::FW_W_EN>) _param_fw_w_en,
+		(ParamFloat<px4::params::FW_W_RMAX>) _param_fw_w_rmax,
+		(ParamFloat<px4::params::FW_WR_FF>) _param_fw_wr_ff,
+		(ParamFloat<px4::params::FW_WR_I>) _param_fw_wr_i,
+		(ParamFloat<px4::params::FW_WR_IMAX>) _param_fw_wr_imax,
+		(ParamFloat<px4::params::FW_WR_P>) _param_fw_wr_p,
 
-		float trim_roll;
-		float trim_pitch;
-		float trim_yaw;
-		float dtrim_roll_vmin;
-		float dtrim_pitch_vmin;
-		float dtrim_yaw_vmin;
-		float dtrim_roll_vmax;
-		float dtrim_pitch_vmax;
-		float dtrim_yaw_vmax;
-		float dtrim_roll_flaps;
-		float dtrim_pitch_flaps;
-		float rollsp_offset_deg;		/**< Roll Setpoint Offset in deg */
-		float pitchsp_offset_deg;		/**< Pitch Setpoint Offset in deg */
-		float rollsp_offset_rad;		/**< Roll Setpoint Offset in rad */
-		float pitchsp_offset_rad;		/**< Pitch Setpoint Offset in rad */
-		float man_roll_max;				/**< Max Roll in rad */
-		float man_pitch_max;			/**< Max Pitch in rad */
-		float man_roll_scale;			/**< scale factor applied to roll actuator control in pure manual mode */
-		float man_pitch_scale;			/**< scale factor applied to pitch actuator control in pure manual mode */
-		float man_yaw_scale; 			/**< scale factor applied to yaw actuator control in pure manual mode */
+		(ParamFloat<px4::params::FW_Y_RMAX>) _param_fw_y_rmax,
+		(ParamFloat<px4::params::FW_MAN_YR_MAX>) _param_man_yr_max
 
-		float acro_max_x_rate_rad;
-		float acro_max_y_rate_rad;
-		float acro_max_z_rate_rad;
+	)
 
-		float flaps_scale;				/**< Scale factor for flaps */
-		float flaps_takeoff_scale; /**< Scale factor for flaps on take-off */
-		float flaperon_scale;			/**< Scale factor for flaperons */
+	RollController _roll_ctrl;
+	PitchController _pitch_ctrl;
+	YawController _yaw_ctrl;
+	WheelController _wheel_ctrl;
 
-		float rattitude_thres;
-
-		int32_t vtol_type;					/**< VTOL type: 0 = tailsitter, 1 = tiltrotor */
-
-		int32_t bat_scale_en;			/**< Battery scaling enabled */
-		bool airspeed_disabled;
-
-	} _parameters{};			/**< local copies of interesting parameters */
-
-	struct {
-
-		param_t p_tc;
-		param_t p_p;
-		param_t p_i;
-		param_t p_ff;
-		param_t p_rmax_pos;
-		param_t p_rmax_neg;
-		param_t p_integrator_max;
-		param_t r_tc;
-		param_t r_p;
-		param_t r_i;
-		param_t r_ff;
-		param_t r_integrator_max;
-		param_t r_rmax;
-		param_t y_p;
-		param_t y_i;
-		param_t y_ff;
-		param_t y_integrator_max;
-		param_t roll_to_yaw_ff;
-		param_t y_rmax;
-
-		param_t w_en;
-		param_t w_p;
-		param_t w_i;
-		param_t w_ff;
-		param_t w_integrator_max;
-		param_t w_rmax;
-
-		param_t airspeed_min;
-		param_t airspeed_trim;
-		param_t airspeed_max;
-
-		param_t trim_roll;
-		param_t trim_pitch;
-		param_t trim_yaw;
-		param_t dtrim_roll_vmin;
-		param_t dtrim_pitch_vmin;
-		param_t dtrim_yaw_vmin;
-		param_t dtrim_roll_vmax;
-		param_t dtrim_pitch_vmax;
-		param_t dtrim_yaw_vmax;
-		param_t dtrim_roll_flaps;
-		param_t dtrim_pitch_flaps;
-		param_t rollsp_offset_deg;
-		param_t pitchsp_offset_deg;
-		param_t man_roll_max;
-		param_t man_pitch_max;
-		param_t man_roll_scale;
-		param_t man_pitch_scale;
-		param_t man_yaw_scale;
-
-		param_t acro_max_x_rate;
-		param_t acro_max_y_rate;
-		param_t acro_max_z_rate;
-
-		param_t flaps_scale;
-		param_t flaps_takeoff_scale;
-		param_t flaperon_scale;
-
-		param_t rattitude_thres;
-
-		param_t vtol_type;
-
-		param_t bat_scale_en;
-		param_t airspeed_mode;
-
-	} _parameter_handles{};		/**< handles for interesting parameters */
-
-	ECL_RollController				_roll_ctrl;
-	ECL_PitchController				_pitch_ctrl;
-	ECL_YawController				_yaw_ctrl;
-	ECL_WheelController			_wheel_ctrl;
-
-	void control_flaps(const float dt);
-
-	/**
-	 * Update our local parameter cache.
-	 */
-	int		parameters_update();
-
-	void		vehicle_control_mode_poll();
-	void		vehicle_manual_poll();
-	void		vehicle_setpoint_poll();
-	void		global_pos_poll();
-	void		vehicle_status_poll();
-	void		vehicle_land_detected_poll();
-
+	void parameters_update();
+	void vehicle_manual_poll(const float yaw_body);
+	void vehicle_attitude_setpoint_poll();
+	void vehicle_land_detected_poll();
+	float get_airspeed_constrained();
 };

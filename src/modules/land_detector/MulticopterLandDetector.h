@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2016 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,20 +42,13 @@
 
 #pragma once
 
-#include "LandDetector.h"
-
-#include <parameters/param.h>
-#include <uORB/topics/vehicle_local_position.h>
-#include <uORB/topics/vehicle_local_position_setpoint.h>
-#include <uORB/topics/vehicle_attitude.h>
-#include <uORB/topics/actuator_controls.h>
-#include <uORB/topics/actuator_controls.h>
-#include <uORB/topics/battery_status.h>
-#include <uORB/topics/parameter_update.h>
-#include <uORB/topics/sensor_bias.h>
-#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/hover_thrust_estimate.h>
+#include <uORB/topics/trajectory_setpoint.h>
 #include <uORB/topics/vehicle_control_mode.h>
-#include <uORB/topics/vehicle_local_position.h>
+#include <uORB/topics/vehicle_thrust_setpoint.h>
+#include <uORB/topics/takeoff_status.h>
+
+#include "LandDetector.h"
 
 using namespace time_literals;
 
@@ -66,9 +59,9 @@ class MulticopterLandDetector : public LandDetector
 {
 public:
 	MulticopterLandDetector();
+	~MulticopterLandDetector() override = default;
 
 protected:
-	void _initialize_topics() override;
 	void _update_params() override;
 	void _update_topics() override;
 
@@ -76,80 +69,77 @@ protected:
 	bool _get_ground_contact_state() override;
 	bool _get_maybe_landed_state() override;
 	bool _get_freefall_state() override;
+	bool _get_ground_effect_state() override;
+	bool _get_in_descend() override { return _in_descend; }
+	bool _get_has_low_throttle() override { return _has_low_throttle; }
+	bool _get_horizontal_movement() override { return _horizontal_movement; }
+	bool _get_vertical_movement() override { return _vertical_movement; }
+	bool _get_rotational_movement() override { return _rotational_movement; }
+	bool _get_close_to_ground_or_skipped_check() override { return _close_to_ground_or_skipped_check; }
 
-	float _get_max_altitude() override;
+	void _set_hysteresis_factor(const int factor) override;
 private:
+	bool _is_close_to_ground();
 
-	/** Time in us that landing conditions have to hold before triggering a land. */
-	static constexpr hrt_abstime LAND_DETECTOR_TRIGGER_TIME_US = 300_ms;
+	/** Time in us that freefall has to hold before triggering freefall */
+	static constexpr hrt_abstime FREEFALL_TRIGGER_TIME_US = 300_ms;
 
-	/** Time in us that almost landing conditions have to hold before triggering almost landed . */
-	static constexpr hrt_abstime MAYBE_LAND_DETECTOR_TRIGGER_TIME_US = 250_ms;
+	/** Distance above ground below which entering ground contact state is possible when distance to ground is available. */
+	static constexpr float DIST_FROM_GROUND_THRESHOLD = 1.0f;
 
-	/** Time in us that ground contact condition have to hold before triggering contact ground */
-	static constexpr hrt_abstime GROUND_CONTACT_TRIGGER_TIME_US = 350_ms;
-
-	/** Time interval in us in which wider acceptance thresholds are used after landed. */
-	static constexpr hrt_abstime LAND_DETECTOR_LAND_PHASE_TIME_US = 2_s;
-
-	/**
-	* @brief Handles for interesting parameters
-	**/
 	struct {
-		param_t maxClimbRate;
-		param_t maxVelocity;
-		param_t maxRotation;
 		param_t minThrottle;
 		param_t hoverThrottle;
-		param_t throttleRange;
 		param_t minManThrottle;
-		param_t freefall_acc_threshold;
-		param_t freefall_trigger_time;
-		param_t altitude_max;
+		param_t useHoverThrustEstimate;
 		param_t landSpeed;
+		param_t crawlSpeed;
 	} _paramHandle{};
 
 	struct {
-		float maxClimbRate;
-		float maxVelocity;
-		float maxRotation_rad_s;
 		float minThrottle;
 		float hoverThrottle;
-		float throttleRange;
 		float minManThrottle;
-		float freefall_acc_threshold;
-		float freefall_trigger_time;
-		float altitude_max;
+		bool useHoverThrustEstimate;
 		float landSpeed;
+		float crawlSpeed;
 	} _params{};
 
-	int _vehicleLocalPositionSub{-1};
-	int _vehicleLocalPositionSetpointSub{-1};
-	int _actuatorsSub{-1};
-	int _attitudeSub{-1};
-	int _sensor_bias_sub{-1};
-	int _vehicle_control_mode_sub{-1};
-	int _battery_sub{-1};
+	uORB::Subscription _vehicle_thrust_setpoint_sub{ORB_ID(vehicle_thrust_setpoint)};
+	uORB::Subscription _hover_thrust_estimate_sub{ORB_ID(hover_thrust_estimate)};
+	uORB::Subscription _trajectory_setpoint_sub{ORB_ID(trajectory_setpoint)};
 
-	vehicle_local_position_s				_vehicleLocalPosition {};
-	vehicle_local_position_setpoint_s	_vehicleLocalPositionSetpoint {};
-	actuator_controls_s					_actuators {};
-	vehicle_attitude_s					_vehicleAttitude {};
-	sensor_bias_s					_sensors {};
-	vehicle_control_mode_s				_control_mode {};
-	battery_status_s						_battery {};
+	uORB::Subscription _vehicle_control_mode_sub{ORB_ID(vehicle_control_mode)};
+	uORB::Subscription _takeoff_status_sub{ORB_ID(takeoff_status)};
 
-	hrt_abstime _min_trust_start{0};		///< timestamp when minimum trust was applied first
-	hrt_abstime _landed_time{0};
+	hrt_abstime _hover_thrust_estimate_last_valid{0};
+	bool _hover_thrust_estimate_valid{false};
 
-	/* get control mode dependent pilot throttle threshold with which we should quit landed state and take off */
-	float _get_takeoff_throttle();
-	bool _has_altitude_lock();
-	bool _has_position_lock();
-	bool _has_minimal_thrust();
-	bool _has_low_thrust();
-	bool _is_climb_rate_enabled();
+	bool _flag_control_climb_rate_enabled{false};
+	bool _hover_thrust_initialized{false};
+
+	float _vehicle_thrust_setpoint_throttle{0.f};
+
+	uint8_t _takeoff_state{takeoff_status_s::TAKEOFF_STATE_DISARMED};
+
+	systemlib::Hysteresis _minimum_thrust_8s_hysteresis{false};
+
+	bool _in_descend{false};		///< vehicle is commanded to desend
+	bool _horizontal_movement{false};	///< vehicle is moving horizontally
+	bool _vertical_movement{false};
+	bool _rotational_movement{false};
+	bool _has_low_throttle{false};
+	bool _close_to_ground_or_skipped_check{false};
+	bool _below_gnd_effect_hgt{false};	///< vehicle height above ground is below height where ground effect occurs
+
+	DEFINE_PARAMETERS_CUSTOM_PARENT(
+		LandDetector,
+		(ParamFloat<px4::params::LNDMC_TRIG_TIME>)   _param_lndmc_trig_time,
+		(ParamFloat<px4::params::LNDMC_ROT_MAX>)    _param_lndmc_rot_max,
+		(ParamFloat<px4::params::LNDMC_XY_VEL_MAX>) _param_lndmc_xy_vel_max,
+		(ParamFloat<px4::params::LNDMC_Z_VEL_MAX>)  _param_lndmc_z_vel_max,
+		(ParamFloat<px4::params::LNDMC_ALT_GND>)    _param_lndmc_alt_gnd_effect
+	);
 };
-
 
 } // namespace land_detector

@@ -41,7 +41,7 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include <px4_defines.h>
+#include <px4_platform_common/defines.h>
 
 #include "test.hpp"
 
@@ -100,14 +100,9 @@ bool __EXPORT less_than_or_equal(float a, float b)
 	}
 }
 
-void __EXPORT float2SigExp(
-	const float &num,
-	float &sig,
-	int &exp)
+void __EXPORT float2SigExp(const float &num, float &sig, int &exp)
 {
-// FIXME - This code makes no sense when exp is an int
-// FIXME - isnan and isinf not defined for QuRT
-#ifndef __PX4_QURT
+
 	if (!PX4_ISFINITE(num)) {
 		sig = 0.0f;
 		exp = -99;
@@ -129,8 +124,6 @@ void __EXPORT float2SigExp(
 		exp = floor(exp);
 	}
 
-#endif
-
 	sig = num;
 
 	// cheap power since it is integer
@@ -141,5 +134,3 @@ void __EXPORT float2SigExp(
 		for (int i = 0; i < abs(exp); i++) { sig *= 10; }
 	}
 }
-
-

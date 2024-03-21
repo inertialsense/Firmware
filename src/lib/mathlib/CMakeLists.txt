@@ -33,6 +33,19 @@
 
 px4_add_library(mathlib
 	math/test/test.cpp
-	math/matrix_alg.cpp
-	math/filter/LowPassFilter2p.cpp
+	math/filter/LowPassFilter2p.hpp
+	math/filter/MedianFilter.hpp
+	math/filter/NotchFilter.hpp
+	math/filter/second_order_reference_model.hpp
 )
+
+px4_add_unit_gtest(SRC math/test/LowPassFilter2pVector3fTest.cpp LINKLIBS mathlib)
+px4_add_unit_gtest(SRC math/test/AlphaFilterTest.cpp)
+px4_add_unit_gtest(SRC math/test/MedianFilterTest.cpp)
+px4_add_unit_gtest(SRC math/test/NotchFilterTest.cpp)
+px4_add_unit_gtest(SRC math/test/second_order_reference_model_test.cpp)
+px4_add_unit_gtest(SRC math/FunctionsTest.cpp)
+px4_add_unit_gtest(SRC math/test/UtilitiesTest.cpp)
+px4_add_unit_gtest(SRC math/WelfordMeanTest.cpp)
+px4_add_unit_gtest(SRC math/WelfordMeanVectorTest.cpp)
+px4_add_unit_gtest(SRC math/MaxDistanceToCircleTest.cpp)

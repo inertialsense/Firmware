@@ -34,21 +34,9 @@
 #include "crsf_telemetry.h"
 #include <lib/rc/crsf.h>
 
-CRSFTelemetry::CRSFTelemetry(int uart_fd)
-	: _vehicle_gps_position_sub(orb_subscribe(ORB_ID(vehicle_gps_position))),
-	  _battery_status_sub(orb_subscribe(ORB_ID(battery_status))),
-	  _vehicle_attitude_sub(orb_subscribe(ORB_ID(vehicle_attitude))),
-	  _vehicle_status_sub(orb_subscribe(ORB_ID(vehicle_status))),
-	  _uart_fd(uart_fd)
+CRSFTelemetry::CRSFTelemetry(int uart_fd) :
+	_uart_fd(uart_fd)
 {
-}
-
-CRSFTelemetry::~CRSFTelemetry()
-{
-	orb_unsubscribe(_vehicle_gps_position_sub);
-	orb_unsubscribe(_battery_status_sub);
-	orb_unsubscribe(_vehicle_attitude_sub);
-	orb_unsubscribe(_vehicle_status_sub);
 }
 
 bool CRSFTelemetry::update(const hrt_abstime &now)
@@ -89,7 +77,7 @@ bool CRSFTelemetry::send_battery()
 {
 	battery_status_s battery_status;
 
-	if (orb_copy(ORB_ID(battery_status), _battery_status_sub, &battery_status) != 0) {
+	if (!_battery_status_sub.update(&battery_status)) {
 		return false;
 	}
 
@@ -102,17 +90,17 @@ bool CRSFTelemetry::send_battery()
 
 bool CRSFTelemetry::send_gps()
 {
-	vehicle_gps_position_s vehicle_gps_position;
+	sensor_gps_s vehicle_gps_position;
 
-	if (orb_copy(ORB_ID(vehicle_gps_position), _vehicle_gps_position_sub, &vehicle_gps_position) != 0) {
+	if (!_vehicle_gps_position_sub.update(&vehicle_gps_position)) {
 		return false;
 	}
 
-	int32_t latitude = vehicle_gps_position.lat;
-	int32_t longitude = vehicle_gps_position.lon;
+	int32_t latitude = static_cast<int32_t>(round(vehicle_gps_position.latitude_deg * 1e7));
+	int32_t longitude = static_cast<int32_t>(round(vehicle_gps_position.longitude_deg * 1e7));
 	uint16_t groundspeed = vehicle_gps_position.vel_d_m_s / 3.6f * 10.f;
 	uint16_t gps_heading = math::degrees(vehicle_gps_position.cog_rad) * 100.f;
-	uint16_t altitude = vehicle_gps_position.alt + 1000;
+	uint16_t altitude = static_cast<int16_t>(round(vehicle_gps_position.altitude_msl_m + 1.0));
 	uint8_t num_satellites = vehicle_gps_position.satellites_used;
 
 	return crsf_send_telemetry_gps(_uart_fd, latitude, longitude, groundspeed,
@@ -123,7 +111,7 @@ bool CRSFTelemetry::send_attitude()
 {
 	vehicle_attitude_s vehicle_attitude;
 
-	if (orb_copy(ORB_ID(vehicle_attitude), _vehicle_attitude_sub, &vehicle_attitude) != 0) {
+	if (!_vehicle_attitude_sub.update(&vehicle_attitude)) {
 		return false;
 	}
 
@@ -138,7 +126,7 @@ bool CRSFTelemetry::send_flight_mode()
 {
 	vehicle_status_s vehicle_status;
 
-	if (orb_copy(ORB_ID(vehicle_status), _vehicle_status_sub, &vehicle_status) != 0) {
+	if (!_vehicle_status_sub.update(&vehicle_status)) {
 		return false;
 	}
 
@@ -166,19 +154,12 @@ bool CRSFTelemetry::send_flight_mode()
 		break;
 
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER:
-	case vehicle_status_s::NAVIGATION_STATE_AUTO_RCRECOVER:
-	case vehicle_status_s::NAVIGATION_STATE_AUTO_RTGS:
 	case vehicle_status_s::NAVIGATION_STATE_DESCEND:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_TAKEOFF:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_LAND:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_FOLLOW_TARGET:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_PRECLAND:
 		flight_mode = "Auto";
-		break;
-
-	case vehicle_status_s::NAVIGATION_STATE_AUTO_LANDENGFAIL:
-	case vehicle_status_s::NAVIGATION_STATE_AUTO_LANDGPSFAIL:
-		flight_mode = "Failure";
 		break;
 
 	case vehicle_status_s::NAVIGATION_STATE_ACRO:
@@ -195,10 +176,6 @@ bool CRSFTelemetry::send_flight_mode()
 
 	case vehicle_status_s::NAVIGATION_STATE_STAB:
 		flight_mode = "Stabilized";
-		break;
-
-	case vehicle_status_s::NAVIGATION_STATE_RATTITUDE:
-		flight_mode = "Rattitude";
 		break;
 	}
 

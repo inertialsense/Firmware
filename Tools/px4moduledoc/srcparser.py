@@ -1,15 +1,22 @@
+#! /usr/bin/env python3
 import sys
 import re
 import math
 import textwrap
+from functools import reduce
+
 
 class ModuleDocumentation(object):
     """
     documentation for a single module
     """
 
+    # If you add categories or subcategories, they also need to be added to the
+    # TOC in https://github.com/PX4/PX4-user_guide/blob/main/en/SUMMARY.md
     valid_categories = ['driver', 'estimator', 'controller', 'system',
-                        'communication', 'command', 'template']
+                        'communication', 'command', 'template', 'simulation', 'autotune']
+    valid_subcategories = ['', 'distance_sensor', 'imu', 'ins', 'airspeed_sensor',
+                           'magnetometer', 'baro', 'optical_flow', 'rpm_sensor', 'transponder']
 
     max_line_length = 80 # wrap lines that are longer than this
 
@@ -19,14 +26,18 @@ class ModuleDocumentation(object):
         """
         self._name = ''
         self._category = ''
+        self._subcategory = ''
         self._doc_string = ''
         self._usage_string = ''
         self._first_command = True
         self._scope = scope
 
         self._options = '' # all option chars
+        self._explicit_options = '' # all option chars (explicit in the module)
         self._all_values = [] # list of all values
         self._all_commands = []
+
+        self._paring_implicit_options = False
 
         for func_name, args in function_calls:
             attribute_name = '_handle_'+func_name.lower()
@@ -43,7 +54,6 @@ class ModuleDocumentation(object):
         assert(len(args) == 1) # description
         self._doc_string = self._get_string(args[0])
 
-
     def _handle_usage_name(self, args):
         assert(len(args) == 2) # executable_name, category
         self._name = self._get_string(args[0])
@@ -51,6 +61,10 @@ class ModuleDocumentation(object):
 
         self._usage_string = "%s <command> [arguments...]\n" % self._name
         self._usage_string += " Commands:\n"
+
+    def _handle_usage_subcategory(self, args):
+        assert(len(args) == 1) # description
+        self._subcategory = self._get_string(args[0])
 
     def _handle_usage_name_simple(self, args):
         assert(len(args) == 2) # executable_name, category
@@ -88,11 +102,12 @@ class ModuleDocumentation(object):
     def _handle_usage_param_int(self, args):
         assert(len(args) == 6) # option_char, default_val, min_val, max_val, description, is_optional
         option_char = self._get_option_char(args[0])
-        default_val = int(args[1])
+        default_val = self._get_int(args[1])
         description = self._get_string(args[4])
         if self._is_bool_true(args[5]):
             self._usage_string += "     [-%s <val>]  %s\n" % (option_char, description)
-            self._usage_string += "                 default: %i\n" % default_val
+            if default_val != -1:
+                self._usage_string += "                 default: %i\n" % default_val
         else:
             self._usage_string += "     -%s <val>    %s\n" % (option_char, description)
 
@@ -103,9 +118,44 @@ class ModuleDocumentation(object):
         description = self._get_string(args[4])
         if self._is_bool_true(args[5]):
             self._usage_string += "     [-%s <val>]  %s\n" % (option_char, description)
-            self._usage_string += "                 default: %.1f\n" % default_val
+            if not math.isnan(default_val):
+                self._usage_string += "                 default: %.1f\n" % default_val
         else:
             self._usage_string += "     -%s <val>    %s\n" % (option_char, description)
+
+    def _handle_usage_params_i2c_spi_driver(self, args):
+        assert(len(args) == 2) # i2c_support, spi_support
+        self._paring_implicit_options = True
+        if self._is_bool_true(args[0]):
+            self._handle_usage_param_flag(['\'I\'', "\"Internal I2C bus(es)\"", 'true'])
+            self._handle_usage_param_flag(['\'X\'', "\"External I2C bus(es)\"", 'true'])
+        if self._is_bool_true(args[1]):
+            self._handle_usage_param_flag(['\'s\'', "\"Internal SPI bus(es)\"", 'true'])
+            self._handle_usage_param_flag(['\'S\'', "\"External SPI bus(es)\"", 'true'])
+
+        self._handle_usage_param_int(['\'b\'', '-1', '0', '16',
+            "\"board-specific bus (default=all) (external SPI: n-th bus (default=1))\"", 'true'])
+
+        if self._is_bool_true(args[1]):
+            self._handle_usage_param_int(['\'c\'', '-1', '0', '31',
+                "\"chip-select pin (for internal SPI) or index (for external SPI)\"", 'true'])
+            self._handle_usage_param_int(['\'m\'', '-1', '0', '3', "\"SPI mode\"", 'true'])
+
+        self._handle_usage_param_int(['\'f\'', '-1', '0', '1000000', "\"bus frequency in kHz\"", 'true'])
+        self._handle_usage_param_flag(['\'q\'', "\"quiet startup (no message if no device found)\"", 'true'])
+        self._paring_implicit_options = False
+
+    def _handle_usage_params_i2c_address(self, args):
+        assert(len(args) == 1) # i2c_address
+        self._paring_implicit_options = True
+        self._handle_usage_param_int(['\'a\'', args[0], '0', '0xff', "\"I2C address\"", 'true'])
+        self._paring_implicit_options = False
+
+    def _handle_usage_params_i2c_keep_running_flag(self, args):
+        assert(len(args) == 0)
+        self._paring_implicit_options = True
+        self._handle_usage_param_flag(['\'k\'', "\"if initialization (probing) fails, keep retrying periodically\"", 'true'])
+        self._paring_implicit_options = False
 
     def _handle_usage_param_flag(self, args):
         assert(len(args) == 3) # option_char, description, is_optional
@@ -164,6 +214,9 @@ class ModuleDocumentation(object):
             f = f[:-1]
         return float(f)
 
+    def _get_int(self, argument):
+        return int(eval(argument))
+
     def _is_string(self, argument):
         return len(argument) > 0 and argument[0] == '"'
 
@@ -174,6 +227,8 @@ class ModuleDocumentation(object):
         assert(len(argument) == 3) # must have the form: 'p' (assume there's no escaping)
         option_char = argument[1]
         self._options += option_char
+        if not self._paring_implicit_options:
+            self._explicit_options += option_char
         return option_char
 
 
@@ -193,6 +248,9 @@ class ModuleDocumentation(object):
 
     def category(self):
         return self._category
+
+    def subcategory(self):
+        return self._subcategory
 
     def scope(self):
         return self._scope
@@ -218,9 +276,10 @@ class ModuleDocumentation(object):
 
     def options(self):
         """
-        get all the -p options as string of chars
+        get all the -p options as string of chars, that are explicitly set in
+        the module
         """
-        return self._options
+        return self._explicit_options
 
     def all_values(self):
         """
@@ -241,7 +300,7 @@ class SourceParser(object):
     """
 
     # Regex to extract module doc function calls, starting with PRINT_MODULE_
-    re_doc_definition = re.compile(r'PRINT_MODULE_([A-Z_]*)\s*\(')
+    re_doc_definition = re.compile(r'PRINT_MODULE_([A-Z0-9_]*)\s*\(')
 
     def __init__(self):
         self._modules = {} # all found modules: key is the module name
@@ -251,6 +310,8 @@ class SourceParser(object):
             r'//.*?$|/\*.*?\*/|\'(?:\\.|[^\\\'])*\'|"(?:\\.|[^\\"])*"',
             re.DOTALL | re.MULTILINE)
 
+        self._define_pattern = re.compile(r'#define\s+(\w+?)[^\S\r\n]+(.+?)\s*?\n')
+
     def Parse(self, scope, contents):
         """
         Incrementally parse program contents and append all found documentations
@@ -259,6 +320,9 @@ class SourceParser(object):
 
         # remove comments from source
         contents = self._comment_remover(contents)
+
+        # replace preprocessor defines defined in file directly
+        contents = self._define_replacer(contents)
 
         extracted_function_calls = [] # list of tuples: (FUNC_NAME, list(ARGS))
 
@@ -302,6 +366,9 @@ class SourceParser(object):
             if not module_doc.category() in ModuleDocumentation.valid_categories:
                 raise  Exception('Invalid/unknown category ' +
                         module_doc.category() + ' for ' + scope)
+            if not module_doc.subcategory() in ModuleDocumentation.valid_subcategories:
+                raise  Exception('Invalid/unknown subcategory ' +
+                        module_doc.subcategory() + ' for ' + scope)
 
             self._do_consistency_check(contents, scope, module_doc)
 
@@ -319,6 +386,15 @@ class SourceParser(object):
             else:
                 return s
         return re.sub(self._comment_remove_pattern, replacer, text)
+
+    def _define_replacer(self, text):
+        """ check for C preprocesor #define in text and replace with argument"""
+        text = re.sub(r"\\\s*?\n"," ",text)
+        define_iter = self._define_pattern.finditer(text)
+        for define_pattern in define_iter:
+            text = re.sub(r"\b" +re.escape(str(define_pattern.groups()[0])) + r"\b", re.escape(str(define_pattern.groups()[1])), text)
+        return text
+
 
     def _do_consistency_check(self, contents, scope, module_doc):
         """
@@ -352,9 +428,9 @@ class SourceParser(object):
                             failed = True
 
                 if failed:
-                    print("Warning: documentation inconsistency in %s:" % scope)
-                    print(" Documented options       : %s" % sorted_module_options)
-                    print(" Options found in getopt(): %s" % sorted_getopt_args)
+                    print(("Warning: documentation inconsistency in %s:" % scope))
+                    print((" Documented options       : %s" % sorted_module_options))
+                    print((" Options found in getopt(): %s" % sorted_getopt_args))
                     self._consistency_checks_failure = True
 
 
@@ -376,7 +452,7 @@ class SourceParser(object):
                 continue # handled in the base class
 
             if not command in doc_commands:
-                print("Warning: undocumented command '%s' in %s" %(command, scope))
+                print(("Warning: undocumented command '%s' in %s" %(command, scope)))
                 self._consistency_checks_failure = True
 
         # limit the maximum line length in the module doc string
@@ -392,8 +468,8 @@ class SourceParser(object):
             elif not verbatim_mode:
                 if not 'www.' in line and not 'http' in line:
                     if len(line) > max_line_length:
-                        print('Line too long (%i > %i) in %s:' % (len(line), max_line_length, scope))
-                        print(' '+line)
+                        print(('Line too long (%i > %i) in %s:' % (len(line), max_line_length, scope)))
+                        print((' '+line))
                         self._consistency_checks_failure = True
 
 
@@ -425,7 +501,7 @@ class SourceParser(object):
                 while next_position < len(contents):
                     if contents[next_position] == '\\': # escaping
                         if contents[next_position + 1] != '\n': # skip if continued on next line
-                            string += contents[next_position:next_position+2].decode('string_escape')
+                            string += contents[next_position:next_position+2].encode().decode('unicode_escape')
                         next_position += 2
                     elif contents[next_position] == '"':
                         next_position += 1
@@ -481,19 +557,24 @@ class SourceParser(object):
 
     def GetModuleGroups(self):
         """
-        Returns a dictionary of all categories with a list of associated modules.
+        Returns a dictionary of all categories with a dictonary of subcategories
+        that contain a list of associated modules.
         """
         groups = {}
         for module_name in self._modules:
             module = self._modules[module_name]
+            subcategory = module.subcategory()
             if module.category() in groups:
-                groups[module.category()].append(module)
+                if subcategory in groups[module.category()]:
+                    groups[module.category()][subcategory].append(module)
+                else:
+                    groups[module.category()][subcategory] = [module]
             else:
-                groups[module.category()]= [module]
+                groups[module.category()] = {subcategory: [module]}
 
         # sort by module name
         for category in groups:
             group = groups[category]
-            groups[category] = sorted(group, key=lambda x: x.name())
+            for subcategory in group:
+                group[subcategory] = sorted(group[subcategory], key=lambda x: x.name())
         return groups
-

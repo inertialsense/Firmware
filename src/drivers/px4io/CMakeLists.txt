@@ -33,44 +33,44 @@
 px4_add_module(
 	MODULE drivers__px4io
 	MAIN px4io
-	STACK_MAIN 1816
 	COMPILE_FLAGS
+		-Wno-cast-align # TODO: fix and enable
 	SRCS
 		px4io.cpp
-		px4io_uploader.cpp
 		px4io_serial.cpp
-		px4io_serial_f4.cpp
-		px4io_serial_f7.cpp
+		px4io_uploader.cpp
+	MODULE_CONFIG
+		module.yaml
 	DEPENDS
+		arch_px4io_serial
+		button_publisher
 		circuit_breaker
-		mixer
+		mixer_module
 	)
 
 # include the px4io binary in ROMFS
-message(STATUS "Building and including ${config_io_board}")
+if(CONFIG_BOARD_IO)
+	message(STATUS "drivers/px4io: ROMFS including ${CONFIG_BOARD_IO}")
 
-set(fw_io_exe "${PX4_SOURCE_DIR}/build/nuttx_${config_io_board}_default/nuttx_${config_io_board}_default.elf")
-set(fw_io_bin "${PX4_BINARY_DIR}/romfs_extras/${config_io_board}.bin" CACHE FILEPATH "px4io binary path")
+	include(ExternalProject)
 
-file(GLOB_RECURSE px4io_driver_files ${PX4_SOURCE_DIR}/src/drivers/boards/${config_io_board}/*)
-file(GLOB_RECURSE px4io_config_files ${PX4_SOURCE_DIR}/platforms/nuttx/NuttX/configs/${config_io_board}/*)
-file(GLOB_RECURSE px4io_firmware_files ${PX4_SOURCE_DIR}/src/modules/px4iofirmware/*)
-file(GLOB_RECURSE px4io_rc_files ${PX4_SOURCE_DIR}/src/lib/rc/*)
-add_custom_command(OUTPUT ${fw_io_exe}
-	COMMAND make --no-print-directory nuttx_${config_io_board}_default
-	DEPENDS ${px4io_driver_files} ${px4io_config_files} ${px4io_firmware_files} ${px4io_rc_files}
-	WORKING_DIRECTORY ${PX4_SOURCE_DIR}
-	COMMENT "Building ${config_io_board}"
-	USES_TERMINAL
+	ExternalProject_Add(px4io_firmware_build
+		DOWNLOAD_COMMAND rsync -a --safe-links --delete --exclude=build --exclude=*.o --exclude=*.a --exclude=.config ${PX4_SOURCE_DIR}/ ${PX4_BINARY_DIR}/external/Source/px4io_firmware_build/
+		UPDATE_COMMAND   rsync -a --safe-links --delete --exclude=build --exclude=*.o --exclude=*.a --exclude=.config ${PX4_SOURCE_DIR}/ ${PX4_BINARY_DIR}/external/Source/px4io_firmware_build/
+		DEPENDS git_nuttx git_nuttx_apps
+		SOURCE_DIR ${PX4_BINARY_DIR}/external/Source/px4io_firmware_build/
+		CMAKE_ARGS -DCONFIG=${CONFIG_BOARD_IO}
+		INSTALL_COMMAND ""
+		USES_TERMINAL_BUILD true
+		EXCLUDE_FROM_ALL true
+		BUILD_ALWAYS true
 	)
 
-file(RELATIVE_PATH fw_io_exe_relative ${CMAKE_CURRENT_BINARY_DIR} ${fw_io_exe})
-file(RELATIVE_PATH fw_io_bin_relative ${CMAKE_CURRENT_BINARY_DIR} ${fw_io_bin})
+	ExternalProject_Get_Property(px4io_firmware_build BINARY_DIR)
 
-add_custom_command(OUTPUT ${fw_io_bin}
-	COMMAND ${CMAKE_COMMAND} -E make_directory ${PX4_BINARY_DIR}/romfs_extras
-	COMMAND ${CMAKE_OBJCOPY} -O binary ${fw_io_exe_relative} ${fw_io_bin_relative}
-	DEPENDS ${fw_io_exe}
-	COMMENT "Copying ${config_io_board} to ROMFS extras"
+	add_custom_target(px4io_firmware_update
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different ${BINARY_DIR}/${CONFIG_BOARD_IO}.bin ${PX4_BOARD_DIR}/extras/${CONFIG_BOARD_IO}.bin
+		DEPENDS px4io_firmware_build
+		COMMENT "Copying ${CONFIG_BOARD_IO} to board extras"
 	)
-add_custom_target(copy_px4io_bin DEPENDS ${fw_io_bin})
+endif()

@@ -48,34 +48,18 @@
  *
  * Note: Setting this value to 4 enables flight termination,
  * which will kill the vehicle on violation of the fence.
- * Due to the inherent danger of this, this function is
- * disabled using a software circuit breaker, which needs
- * to be reset to 0 to really shut down the system.
  *
  * @min 0
- * @max 4
+ * @max 5
  * @value 0 None
  * @value 1 Warning
  * @value 2 Hold mode
  * @value 3 Return mode
  * @value 4 Terminate
+ * @value 5 Land mode
  * @group Geofence
  */
-PARAM_DEFINE_INT32(GF_ACTION, 1);
-
-/**
- * Geofence altitude mode
- *
- * Select which altitude reference should be used
- * 0 = WGS84, 1 = AMSL
- *
- * @min 0
- * @max 1
- * @value 0 WGS84
- * @value 1 AMSL
- * @group Geofence
- */
-PARAM_DEFINE_INT32(GF_ALTMODE, 0);
+PARAM_DEFINE_INT32(GF_ACTION, 2);
 
 /**
  * Geofence source
@@ -93,21 +77,10 @@ PARAM_DEFINE_INT32(GF_ALTMODE, 0);
 PARAM_DEFINE_INT32(GF_SOURCE, 0);
 
 /**
- * Geofence counter limit
+ * Max horizontal distance from Home
  *
- * Set how many subsequent position measurements outside of the fence are needed before geofence violation is triggered
- *
- * @min -1
- * @max 10
- * @increment 1
- * @group Geofence
- */
-PARAM_DEFINE_INT32(GF_COUNT, -1);
-
-/**
- * Max horizontal distance in meters.
- *
- * Maximum horizontal distance in meters the vehicle can be from home before triggering a geofence action. Disabled if 0.
+ * Maximum horizontal distance in meters the vehicle can be from Home before triggering a geofence action.
+ * Disabled if 0.
  *
  * @unit m
  * @min 0
@@ -115,12 +88,13 @@ PARAM_DEFINE_INT32(GF_COUNT, -1);
  * @increment 1
  * @group Geofence
  */
-PARAM_DEFINE_FLOAT(GF_MAX_HOR_DIST, 0);
+PARAM_DEFINE_FLOAT(GF_MAX_HOR_DIST, 0.0f);
 
 /**
- * Max vertical distance in meters.
+ * Max vertical distance from Home
  *
- * Maximum vertical distance in meters the vehicle can be from home before triggering a geofence action. Disabled if 0.
+ * Maximum vertical distance in meters the vehicle can be from Home before triggering a geofence action.
+ * Disabled if 0.
  *
  * @unit m
  * @min 0
@@ -128,4 +102,18 @@ PARAM_DEFINE_FLOAT(GF_MAX_HOR_DIST, 0);
  * @increment 1
  * @group Geofence
  */
-PARAM_DEFINE_FLOAT(GF_MAX_VER_DIST, 0);
+PARAM_DEFINE_FLOAT(GF_MAX_VER_DIST, 0.0f);
+
+/**
+ * [EXPERIMENTAL] Use Pre-emptive geofence triggering
+ *
+ * WARNING: This experimental feature may cause flyaways. Use at your own risk.
+ *
+ * Predict the motion of the vehicle and trigger the breach if it is determined that the current trajectory
+ * would result in a breach happening before the vehicle can make evasive maneuvers.
+ * The vehicle is then re-routed to a safe hold position (stop for multirotor, loiter for fixed wing).
+ *
+ * @boolean
+ * @group Geofence
+ */
+PARAM_DEFINE_INT32(GF_PREDICT, 0);

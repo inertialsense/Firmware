@@ -38,7 +38,7 @@
  * @author Example User <mail@example.com>
  */
 
-#include <px4_config.h>
+#include <px4_platform_common/px4_config.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -118,7 +118,7 @@ int px4_mavlink_debug_main(int argc, char *argv[])
 		warnx("sent one more value..");
 
 		value_counter++;
-		usleep(500000);
+		px4_usleep(500000);
 	}
 
 	return 0;

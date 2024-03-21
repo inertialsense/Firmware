@@ -37,10 +37,9 @@
  * I2C interface for LIS3MDL
  */
 
-#include <px4_config.h>
+#include <px4_platform_common/px4_config.h>
 
 #include <assert.h>
-#include <debug.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -48,26 +47,17 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <arch/board/board.h>
-
 #include <drivers/device/i2c.h>
-#include <drivers/drv_mag.h>
-#include <drivers/drv_device.h>
 
 #include "board_config.h"
 #include "lis3mdl.h"
 
-#if defined(PX4_I2C_BUS_ONBOARD) || defined(PX4_I2C_BUS_EXPANSION)
-
-#define LIS3MDLL_ADDRESS        0x1e
-
 class LIS3MDL_I2C : public device::I2C
 {
 public:
-	LIS3MDL_I2C(int bus);
+	LIS3MDL_I2C(const I2CSPIDriverConfig &config);
 	virtual ~LIS3MDL_I2C() = default;
 
-	virtual int     ioctl(unsigned operation, unsigned &arg);
 	virtual int     read(unsigned address, void *data, unsigned count);
 	virtual int     write(unsigned address, void *data, unsigned count);
 
@@ -77,67 +67,45 @@ protected:
 };
 
 device::Device *
-LIS3MDL_I2C_interface(int bus);
+LIS3MDL_I2C_interface(const I2CSPIDriverConfig &config);
 
 device::Device *
-LIS3MDL_I2C_interface(int bus)
+LIS3MDL_I2C_interface(const I2CSPIDriverConfig &config)
 {
-	return new LIS3MDL_I2C(bus);
+	return new LIS3MDL_I2C(config);
 }
 
-LIS3MDL_I2C::LIS3MDL_I2C(int bus) :
-	I2C("LIS3MDL_I2C", nullptr, bus, LIS3MDLL_ADDRESS, 400000)
+LIS3MDL_I2C::LIS3MDL_I2C(const I2CSPIDriverConfig &config) :
+	I2C(config)
 {
-	_device_id.devid_s.devtype = DRV_MAG_DEVTYPE_LIS3MDL;
 }
 
-int
-LIS3MDL_I2C::ioctl(unsigned operation, unsigned &arg)
-{
-	switch (operation) {
-
-	case MAGIOCGEXTERNAL:
-		return external();
-
-	case DEVIOCGDEVICEID:
-		return CDev::ioctl(nullptr, operation, arg);
-
-	default:
-		return  -EINVAL;
-	}
-}
-
-int
-LIS3MDL_I2C::probe()
+int LIS3MDL_I2C::probe()
 {
 	uint8_t data = 0;
-
-	_retries = 10;
 
 	if (read(ADDR_WHO_AM_I, &data, 1)) {
 		DEVICE_DEBUG("read_reg fail");
 		return -EIO;
 	}
 
-	_retries = 2;
-
 	if (data != ID_WHO_AM_I) {
 		DEVICE_DEBUG("LIS3MDL bad ID: %02x", data);
 		return -EIO;
 	}
 
+	_retries = 1;
+
 	return OK;
 }
 
-int
-LIS3MDL_I2C::read(unsigned address, void *data, unsigned count)
+int LIS3MDL_I2C::read(unsigned address, void *data, unsigned count)
 {
 	uint8_t cmd = address;
 	return transfer(&cmd, 1, (uint8_t *)data, count);
 }
 
-int
-LIS3MDL_I2C::write(unsigned address, void *data, unsigned count)
+int LIS3MDL_I2C::write(unsigned address, void *data, unsigned count)
 {
 	uint8_t buf[32];
 
@@ -150,5 +118,3 @@ LIS3MDL_I2C::write(unsigned address, void *data, unsigned count)
 
 	return transfer(&buf[0], count + 1, nullptr, 0);
 }
-
-#endif /* PX4_I2C_OBDEV_LIS3MDL */

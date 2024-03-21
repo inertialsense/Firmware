@@ -41,8 +41,8 @@
 
 #include <float.h>
 
-#include <px4_log.h>
-#include <px4_defines.h>
+#include <px4_platform_common/log.h>
+#include <px4_platform_common/defines.h>
 
 SimpleAnalyzer::SimpleAnalyzer(Mode mode, float window) :
 	_window(window),
@@ -144,5 +144,31 @@ void SimpleAnalyzer::int_round(float &x) const
 
 	} else {
 		x += 0.5f;
+	}
+}
+
+void convert_limit_safe(float in, uint16_t &out)
+{
+	if (in > UINT16_MAX) {
+		out = UINT16_MAX;
+
+	} else if (in < 0) {
+		out = 0;
+
+	} else {
+		out = static_cast<uint16_t>(in);
+	}
+}
+
+void convert_limit_safe(float in, int16_t &out)
+{
+	if (in > INT16_MAX) {
+		out = INT16_MAX;
+
+	} else if (in < INT16_MIN) {
+		out = INT16_MIN;
+
+	} else {
+		out = static_cast<int16_t>(in);
 	}
 }

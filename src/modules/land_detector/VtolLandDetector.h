@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2016 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,16 +33,15 @@
 
 /**
  * @file VtolLandDetector.h
- * Land detection implementation for VTOL also called hybrids.
+ * Land detection implementation for VTOLs.
+ * It uses the MC land detector in hover, while land detection in FW
+ * is 1:1 linked to the (boolean) armed state.
  *
  * @author Roman Bapst <bapstr@gmail.com>
  * @author Julian Oes <julian@oes.ch>
  */
 
 #pragma once
-
-#include <uORB/topics/airspeed.h>
-#include <uORB/topics/vehicle_status.h>
 
 #include "MulticopterLandDetector.h"
 
@@ -52,33 +51,14 @@ namespace land_detector
 class VtolLandDetector : public MulticopterLandDetector
 {
 public:
-	VtolLandDetector();
+	VtolLandDetector() = default;
+	~VtolLandDetector() override = default;
 
 protected:
-	void _initialize_topics() override;
-	void _update_params() override;
 	void _update_topics() override;
 	bool _get_landed_state() override;
 	bool _get_maybe_landed_state() override;
-
-private:
-	struct {
-		param_t maxAirSpeed;
-	} _paramHandle{};
-
-	struct {
-		float maxAirSpeed;
-	} _params{};
-
-	int _airspeedSub{-1};
-	int _vehicle_status_sub{-1};
-
-	airspeed_s		_airspeed{};
-	vehicle_status_s	_vehicle_status{};
-
-	bool _was_in_air{false}; /**< indicates whether the vehicle was in the air in the previous iteration */
-	float _airspeed_filtered{0.0f}; /**< low pass filtered airspeed */
+	bool _get_freefall_state() override;
 };
-
 
 } // namespace land_detector

@@ -4,9 +4,19 @@ Param source code generation script.
 """
 from __future__ import print_function
 import xml.etree.ElementTree as ET
-import codecs
 import argparse
-from jinja2 import Environment, FileSystemLoader
+import sys
+
+try:
+    from jinja2 import Environment, FileSystemLoader
+except ImportError as e:
+    print("Failed to import jinja2: " + str(e))
+    print("")
+    print("You may need to install it using:")
+    print("    pip3 install --user jinja2")
+    print("")
+    sys.exit(1)
+
 import os
 
 def generate(xml_file, dest='.'):
@@ -39,9 +49,7 @@ def generate(xml_file, dest='.'):
         os.path.mkdir(dest)
 
     template_files = [
-        'px4_parameters.h.jinja',
-        'px4_parameters_public.h.jinja',
-        'px4_parameters.c.jinja',
+        'px4_parameters.hpp.jinja',
     ]
     for template_file in template_files:
         template = env.get_template(template_file)

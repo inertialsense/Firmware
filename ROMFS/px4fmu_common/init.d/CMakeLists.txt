@@ -31,89 +31,82 @@
 #
 ############################################################################
 
+add_subdirectory(airframes)
+
 px4_add_romfs_files(
-	1000_rc_fw_easystar.hil
-	1001_rc_quad_x.hil
-	2100_standard_plane
-	2105_maja
-	2106_albatross
-	24001_dodeca_cox
-	3000_generic_wing
-	3030_io_camflyer
-	3031_phantom
-	3032_skywalker_x5
-	3033_wingwing
-	3034_fx79
-	3035_viper
-	3036_pigeon
-	3037_parrot_disco_mod
-	3100_tbs_caipirinha
-	4001_quad_x
-	4002_quad_x_mount
-	4003_qavr5
-	4004_H4_680mm
-	4009_qav250
-	4010_dji_f330
-	4011_dji_f450
-	4012_quad_x_can
-	4013_bebop
-	4020_hk_micro_pcb
-	4030_3dr_solo
-	4031_3dr_quad
-	4040_reaper
-	4050_generic_250
-	4051_s250aq
-	4060_dji_matrice_100
-	4070_aerofc
-	4080_zmr250
-	4090_nanomind
-	4900_crazyflie
-	5001_quad_+
-	6001_hexa_x
-	7001_hexa_+
-	8001_octo_x
-	9001_octo_+
-	10015_tbs_discovery
-	10016_3dr_iris
-	10017_steadidrone_qu4d
-	10018_tbs_endurance
-	11001_hexa_cox
-	12001_octo_cox
-	12002_steadidrone_mavrik
-	13000_generic_vtol_standard
-	13001_caipirinha_vtol
-	13002_firefly6
-	13003_quad_tailsitter
-	13004_quad+_tailsitter
-	13005_vtol_AAERT_quad
-	13006_vtol_standard_delta
-	13007_vtol_AAVVT_quad
-	13008_QuadRanger
-	13009_vtol_spt_ranger
-	13010_claire
-	13012_convergence
-	13013_deltaquad
-	14001_tri_y_yaw+
-	14002_tri_y_yaw-
-	15001_coax_heli
-	16001_helicopter
-	50000_generic_ground_vehicle
-	50001_axialracing_ax10
-	50002_traxxas_stampede_2wd
-	rc.fw_apps
-	rc.fw_defaults
-	rc.interface
-	rc.io
-	rc.logging
-	rc.mavlink
-	rc.mc_apps
-	rc.mc_defaults
-	rc.sensors
-	rc.thermal_cal
-	rc.ugv_apps
-	rc.ugv_defaults
-	rc.vehicle_setup
-	rc.vtol_apps
-	rc.vtol_defaults
+
+	rc.autostart_ext
+
 	rcS
+	rc.sensors
+	rc.vehicle_setup
+
+	# TODO
+	rc.balloon_apps
+	rc.balloon_defaults
 )
+
+if(CONFIG_MODULES_AIRSHIP_ATT_CONTROL)
+	px4_add_romfs_files(
+		rc.airship_apps
+		rc.airship_defaults
+	)
+endif()
+
+if(CONFIG_MODULES_FW_RATE_CONTROL)
+	px4_add_romfs_files(
+		rc.fw_apps
+		rc.fw_defaults
+	)
+endif()
+
+if(CONFIG_MODULES_MC_RATE_CONTROL)
+	px4_add_romfs_files(
+		rc.heli_defaults
+		rc.mc_apps
+		rc.mc_defaults
+	)
+endif()
+
+if(CONFIG_MODULES_ROVER_POS_CONTROL)
+	px4_add_romfs_files(
+		rc.rover_apps
+		rc.rover_defaults
+
+		rc.boat_defaults # hack
+	)
+endif()
+
+if(CONFIG_MODULES_DIFFERENTIAL_DRIVE)
+	px4_add_romfs_files(
+		rc.rover_differential_apps
+		rc.rover_differential_defaults
+	)
+endif()
+
+if(CONFIG_MODULES_UUV_ATT_CONTROL)
+	px4_add_romfs_files(
+		rc.uuv_apps
+		rc.uuv_defaults
+	)
+endif()
+
+if(CONFIG_MODULES_VTOL_ATT_CONTROL)
+	px4_add_romfs_files(
+		rc.vtol_apps
+		rc.vtol_defaults
+	)
+endif()
+
+
+if(CONFIG_MODULES_LOGGER)
+	px4_add_romfs_files(
+		rc.logging
+	)
+endif()
+
+if(CONFIG_MODULES_TEMPERATURE_COMPENSATION)
+	px4_add_romfs_files(
+		rc.thermal_cal
+	)
+endif()

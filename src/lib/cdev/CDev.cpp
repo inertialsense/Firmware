@@ -41,8 +41,8 @@
 
 #include <cstring>
 
-#include <px4_posix.h>
-#include <drivers/drv_device.h>
+#include <px4_platform_common/log.h>
+#include <px4_platform_common/posix.h>
 
 namespace cdev
 {
@@ -55,7 +55,7 @@ CDev::CDev(const char *devname) :
 	int ret = px4_sem_init(&_lock, 0, 1);
 
 	if (ret != 0) {
-		PX4_ERR("SEM INIT FAIL: ret %d", ret);
+		PX4_DEBUG("SEM INIT FAIL: ret %d", ret);
 	}
 }
 
@@ -129,6 +129,9 @@ CDev::init()
 		if (ret == PX4_OK) {
 			_registered = true;
 		}
+
+	} else {
+		ret = -ENODEV;
 	}
 
 	return ret;
@@ -184,27 +187,6 @@ CDev::close(file_t *filep)
 	}
 
 	unlock();
-
-	return ret;
-}
-
-int
-CDev::ioctl(file_t *filep, int cmd, unsigned long arg)
-{
-	PX4_DEBUG("CDev::ioctl");
-	int ret = -ENOTTY;
-
-	switch (cmd) {
-
-	/* fetch a pointer to the driver's private data */
-	case DIOC_GETPRIV:
-		*(void **)(uintptr_t)arg = (void *)this;
-		ret = PX4_OK;
-		break;
-
-	default:
-		break;
-	}
 
 	return ret;
 }
@@ -327,7 +309,7 @@ CDev::poll(file_t *filep, px4_pollfd_struct_t *fds, bool setup)
 }
 
 void
-CDev::poll_notify(pollevent_t events)
+CDev::poll_notify(px4_pollevent_t events)
 {
 	PX4_DEBUG("CDev::poll_notify events = %0x", events);
 
@@ -344,7 +326,7 @@ CDev::poll_notify(pollevent_t events)
 }
 
 void
-CDev::poll_notify_one(px4_pollfd_struct_t *fds, pollevent_t events)
+CDev::poll_notify_one(px4_pollfd_struct_t *fds, px4_pollevent_t events)
 {
 	PX4_DEBUG("CDev::poll_notify_one");
 

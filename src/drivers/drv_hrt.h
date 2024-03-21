@@ -39,12 +39,17 @@
 
 #pragma once
 
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <stdbool.h>
 #include <inttypes.h>
 
-#include <px4_time.h>
+#include <px4_platform_common/time.h>
 #include <queue.h>
+
+#if defined(__PX4_NUTTX) && !defined(CONFIG_BUILD_FLAT)
+#include <px4_platform/board_ctrl.h>
+#endif
 
 __BEGIN_DECLS
 
@@ -75,7 +80,51 @@ typedef struct hrt_call {
 	hrt_abstime		period;
 	hrt_callout		callout;
 	void			*arg;
+#if defined(__PX4_NUTTX) && !defined(CONFIG_BUILD_FLAT)
+	hrt_callout		usr_callout;
+	void			*usr_arg;
+#endif
 } *hrt_call_t;
+
+
+#define LATENCY_BUCKET_COUNT 8
+extern const uint16_t latency_bucket_count;
+extern const uint16_t latency_buckets[LATENCY_BUCKET_COUNT];
+extern uint32_t latency_counters[LATENCY_BUCKET_COUNT + 1];
+
+typedef struct latency_info {
+	uint16_t                bucket;
+	uint32_t                counter;
+} latency_info_t;
+
+#if defined(__PX4_NUTTX) && !defined(CONFIG_BUILD_FLAT)
+
+typedef struct hrt_boardctl {
+	hrt_call_t		entry;
+	hrt_abstime		time; /* delay or calltime */
+	hrt_abstime		interval;
+	hrt_callout		callout;
+	void			*arg;
+} hrt_boardctl_t;
+
+typedef struct latency_boardctl {
+	uint16_t		bucket_idx;
+	uint16_t		counter_idx;
+	latency_info_t	latency;
+} latency_boardctl_t;
+
+#define _HRTIOC(_n)		(_PX4_IOC(_HRTIOCBASE, _n))
+
+#define HRT_WAITEVENT		_HRTIOC(1)
+#define HRT_ABSOLUTE_TIME	_HRTIOC(2)
+#define HRT_CALL_AFTER		_HRTIOC(3)
+#define HRT_CALL_AT		_HRTIOC(4)
+#define HRT_CALL_EVERY		_HRTIOC(5)
+#define HRT_CANCEL		_HRTIOC(6)
+#define HRT_GET_LATENCY		_HRTIOC(7)
+#define HRT_RESET_LATENCY	_HRTIOC(8)
+
+#endif
 
 /**
  * Get absolute time in [us] (does not wrap).
@@ -85,28 +134,43 @@ __EXPORT extern hrt_abstime hrt_absolute_time(void);
 /**
  * Convert a timespec to absolute time.
  */
-__EXPORT extern hrt_abstime ts_to_abstime(struct timespec *ts);
+static inline hrt_abstime ts_to_abstime(const struct timespec *ts)
+{
+	hrt_abstime	result;
+
+	result = (hrt_abstime)(ts->tv_sec) * 1000000;
+	result += (hrt_abstime)(ts->tv_nsec / 1000);
+
+	return result;
+}
 
 /**
  * Convert absolute time to a timespec.
  */
-__EXPORT extern void	abstime_to_ts(struct timespec *ts, hrt_abstime abstime);
+static inline void abstime_to_ts(struct timespec *ts, hrt_abstime abstime)
+{
+	ts->tv_sec = (typeof(ts->tv_sec))(abstime / 1000000);
+	abstime -= (hrt_abstime)(ts->tv_sec) * 1000000;
+	ts->tv_nsec = (typeof(ts->tv_nsec))(abstime * 1000);
+}
 
 /**
  * Compute the delta between a timestamp taken in the past
  * and now.
  *
- * This function is safe to use even if the timestamp is updated
- * by an interrupt during execution.
+ * This function is not interrupt save.
  */
-__EXPORT extern hrt_abstime hrt_elapsed_time(const volatile hrt_abstime *then);
+static inline hrt_abstime hrt_elapsed_time(const hrt_abstime *then)
+{
+	return hrt_absolute_time() - *then;
+}
 
 /**
  * Store the absolute time in an interrupt-safe fashion.
  *
  * This function ensures that the timestamp cannot be seen half-written by an interrupt handler.
  */
-__EXPORT extern hrt_abstime hrt_store_absolute_time(volatile hrt_abstime *now);
+__EXPORT extern void hrt_store_absolute_time(volatile hrt_abstime *time);
 
 #ifdef __PX4_QURT
 /**
@@ -171,30 +235,55 @@ __EXPORT extern void	hrt_call_delay(struct hrt_call *entry, hrt_abstime delay);
  */
 __EXPORT extern void	hrt_init(void);
 
-#ifdef __PX4_POSIX
-
-/**
- * Start to delay the HRT return value.
- *
- * Until hrt_stop_delay() is called the HRT calls will return the timestamp
- * at the instance then hrt_start_delay() was called.
+/*
+ * Initialise the HRT ioctl (user mode access to HRT).
  */
-__EXPORT extern	void	hrt_start_delay(void);
+__EXPORT extern void	hrt_ioctl_init(void);
 
-/**
- * Stop to delay the HRT.
- */
-__EXPORT extern void	hrt_stop_delay(void);
+#if defined(ENABLE_LOCKSTEP_SCHEDULER)
 
-/**
- * Stop to delay the HRT, but with an exact delta time.
- */
-__EXPORT extern void	hrt_stop_delay_delta(hrt_abstime delta);
+__EXPORT extern int px4_lockstep_register_component(void);
+__EXPORT extern void px4_lockstep_unregister_component(int component);
+__EXPORT extern void px4_lockstep_progress(int component);
+__EXPORT extern void px4_lockstep_wait_for_components(void);
+
+#else
+static inline int px4_lockstep_register_component(void) { return 0; }
+static inline void px4_lockstep_unregister_component(int component) { (void)component; }
+static inline void px4_lockstep_progress(int component) {(void)component; }
+static inline void px4_lockstep_wait_for_components(void) { }
+#endif /* defined(ENABLE_LOCKSTEP_SCHEDULER) */
+
+
+/* Latency counter functions */
+
+static inline uint16_t get_latency_bucket_count(void) { return LATENCY_BUCKET_COUNT; }
+
+#if defined(CONFIG_BUILD_FLAT) || !defined(__PX4_NUTTX)
+
+static inline latency_info_t get_latency(uint16_t bucket_idx, uint16_t counter_idx)
+{
+	latency_info_t ret = {latency_buckets[bucket_idx], latency_counters[counter_idx]};
+	return ret;
+}
+
+static inline void reset_latency_counters(void)
+{
+	for (int i = 0; i <= get_latency_bucket_count(); i++) {
+		latency_counters[i] = 0;
+	}
+}
+
+#else
+
+/* NuttX protected/kernel build interface functions */
+
+latency_info_t get_latency(uint16_t bucket_idx, uint16_t counter_idx);
+void reset_latency_counters(void);
 
 #endif
 
 __END_DECLS
-
 
 
 #ifdef	__cplusplus
@@ -205,19 +294,19 @@ namespace time_literals
 // User-defined integer literals for different time units.
 // The base unit is hrt_abstime in microseconds
 
-constexpr hrt_abstime operator "" _s(unsigned long long seconds)
+constexpr hrt_abstime operator ""_s(unsigned long long seconds)
 {
 	return hrt_abstime(seconds * 1000000ULL);
 }
 
-constexpr hrt_abstime operator "" _ms(unsigned long long seconds)
+constexpr hrt_abstime operator ""_ms(unsigned long long milliseconds)
 {
-	return hrt_abstime(seconds * 1000ULL);
+	return hrt_abstime(milliseconds * 1000ULL);
 }
 
-constexpr hrt_abstime operator "" _us(unsigned long long seconds)
+constexpr hrt_abstime operator ""_us(unsigned long long microseconds)
 {
-	return hrt_abstime(seconds);
+	return hrt_abstime(microseconds);
 }
 
 } /* namespace time_literals */

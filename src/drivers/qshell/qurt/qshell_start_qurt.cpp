@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2016 PX4 Development Team. All rights reserved.
+ * Copyright (C) 2022 ModalAI, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,36 +31,25 @@
  *
  ****************************************************************************/
 
-/**
- * @file qshell_start_qurt.cpp
- * Listener for shell commands from posix
- *
- * @author Nicolas de Palezieux <ndepal@gmail.com>
- */
-
 #include "qshell.h"
-#include <px4_log.h>
-#include <px4_app.h>
-#include <px4_tasks.h>
+#include <px4_platform_common/log.h>
+#include <px4_platform_common/app.h>
+#include <px4_platform_common/tasks.h>
 #include <stdio.h>
 #include <string.h>
 #include <sched.h>
 
 static int daemon_task;             /* Handle of deamon task / thread */
 
-//using namespace px4;
-
 extern "C" __EXPORT int qshell_main(int argc, char *argv[]);
 
 int qshell_entry(int argc, char **argv)
 {
-	//px4::init(argc, argv, "qshell");
-
-	PX4_DEBUG("qshell entry.....");
+	PX4_INFO("qshell entry.....");
 	QShell qshell;
 	qshell.main();
 
-	PX4_DEBUG("goodbye");
+	PX4_INFO("goodbye");
 	return 0;
 }
 
@@ -68,6 +57,7 @@ static void usage()
 {
 	PX4_INFO("usage: qshell {start|stop|status}");
 }
+
 int qshell_main(int argc, char *argv[])
 {
 	if (argc < 2) {
@@ -83,7 +73,7 @@ int qshell_main(int argc, char *argv[])
 			return 0;
 		}
 
-		PX4_DEBUG("before starting the qshell_entry task");
+		PX4_INFO("before starting the qshell_entry task");
 
 		daemon_task = px4_task_spawn_cmd("qshell",
 						 SCHED_DEFAULT,
@@ -91,6 +81,7 @@ int qshell_main(int argc, char *argv[])
 						 8192,
 						 qshell_entry,
 						 (char *const *)argv);
+		PX4_INFO("after starting the qshell_entry task");
 
 		return 0;
 	}

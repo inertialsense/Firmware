@@ -45,8 +45,10 @@ import rospy
 import math
 import numpy as np
 from geometry_msgs.msg import PoseStamped, Quaternion
+from mavros_msgs.msg import ParamValue
 from mavros_test_common import MavrosTestCommon
 from pymavlink import mavutil
+from six.moves import xrange
 from std_msgs.msg import Header
 from threading import Thread
 from tf.transformations import quaternion_from_euler
@@ -71,7 +73,7 @@ class MavrosOffboardPosctlTest(MavrosTestCommon):
         self.pos_setpoint_pub = rospy.Publisher(
             'mavros/setpoint_position/local', PoseStamped, queue_size=1)
 
-        # send setpoints in seperate thread to better prevent failsafe
+        # send setpoints in separate thread to better prevent failsafe
         self.pos_thread = Thread(target=self.send_pos, args=())
         self.pos_thread.daemon = True
         self.pos_thread.start()
@@ -162,6 +164,9 @@ class MavrosOffboardPosctlTest(MavrosTestCommon):
                                    10, -1)
 
         self.log_topic_vars()
+        # exempting failsafe from lost RC to allow offboard
+        rcl_except = ParamValue(1<<2, 0.0)
+        self.set_param("COM_RCL_EXCEPT", rcl_except, 5)
         self.set_mode("OFFBOARD", 5)
         self.set_arm(True, 5)
 

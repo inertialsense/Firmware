@@ -41,8 +41,9 @@
 #pragma once
 
 #include <matrix/math.hpp>
-#include <lib/ecl/geo/geo.h>
-#include <px4_module_params.h>
+#include <lib/geo/geo.h>
+#include <px4_platform_common/module_params.h>
+#include <uORB/Subscription.hpp>
 #include <uORB/topics/landing_target_pose.h>
 
 #include "navigator_mode.h"
@@ -71,12 +72,18 @@ public:
 
 	void on_activation() override;
 	void on_active() override;
+	void on_inactivation() override;
 
 	void set_mode(PrecLandMode mode) { _mode = mode; };
 
 	PrecLandMode get_mode() { return _mode; };
 
+	bool is_activated() { return _is_activated; };
+
 private:
+
+	void updateParams() override;
+
 	// run the control loop for each state
 	void run_state_start();
 	void run_state_horizontal_approach();
@@ -94,17 +101,19 @@ private:
 	bool switch_to_state_fallback();
 	bool switch_to_state_done();
 
+	void print_state_switch_message(const char *state_name);
+
 	// check if a given state could be changed into. Return true if possible to transition to state, false otherwise
 	bool check_state_conditions(PrecLandState state);
 	void slewrate(float &sp_x, float &sp_y);
 
 	landing_target_pose_s _target_pose{}; /**< precision landing target position */
 
-	int _target_pose_sub{-1};
+	uORB::Subscription _target_pose_sub{ORB_ID(landing_target_pose)};
 	bool _target_pose_valid{false}; /**< whether we have received a landing target position message */
 	bool _target_pose_updated{false}; /**< wether the landing target position message is updated */
 
-	struct map_projection_reference_s _map_ref {}; /**< reference for local/global projections */
+	MapProjection _map_ref{}; /**< class for local/global projections */
 
 	uint64_t _state_start_time{0}; /**< time when we entered current state */
 	uint64_t _last_slewrate_time{0}; /**< time when we last limited setpoint changes */
@@ -121,15 +130,21 @@ private:
 
 	PrecLandMode _mode{PrecLandMode::Opportunistic};
 
+	bool _is_activated {false}; /**< indicates if precland is activated */
+
 	DEFINE_PARAMETERS(
-		(ParamFloat<px4::params::PLD_BTOUT>) _param_timeout,
-		(ParamFloat<px4::params::PLD_HACC_RAD>) _param_hacc_rad,
-		(ParamFloat<px4::params::PLD_FAPPR_ALT>) _param_final_approach_alt,
-		(ParamFloat<px4::params::PLD_SRCH_ALT>) _param_search_alt,
-		(ParamFloat<px4::params::PLD_SRCH_TOUT>) _param_search_timeout,
-		(ParamInt<px4::params::PLD_MAX_SRCH>) _param_max_searches,
-		(ParamFloat<px4::params::MPC_ACC_HOR>) _param_acceleration_hor,
-		(ParamFloat<px4::params::MPC_XY_CRUISE>) _param_xy_vel_cruise
+		(ParamFloat<px4::params::PLD_BTOUT>) _param_pld_btout,
+		(ParamFloat<px4::params::PLD_HACC_RAD>) _param_pld_hacc_rad,
+		(ParamFloat<px4::params::PLD_FAPPR_ALT>) _param_pld_fappr_alt,
+		(ParamFloat<px4::params::PLD_SRCH_ALT>) _param_pld_srch_alt,
+		(ParamFloat<px4::params::PLD_SRCH_TOUT>) _param_pld_srch_tout,
+		(ParamInt<px4::params::PLD_MAX_SRCH>) _param_pld_max_srch
 	)
+
+	// non-navigator parameters
+	param_t	_handle_param_acceleration_hor{PARAM_INVALID};
+	param_t	_handle_param_xy_vel_cruise{PARAM_INVALID};
+	float	_param_acceleration_hor{0.0f};
+	float	_param_xy_vel_cruise{0.0f};
 
 };

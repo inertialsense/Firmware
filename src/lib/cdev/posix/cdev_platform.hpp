@@ -1,7 +1,8 @@
 
 #pragma once
 
-#include <cinttypes>
+#include <inttypes.h>
+#include <string.h>
 
 #define ATOMIC_ENTER lock()
 #define ATOMIC_LEAVE unlock()
@@ -16,13 +17,15 @@ struct file_operations {
 using px4_file_operations_t = struct file_operations;
 using mode_t = uint32_t;
 
-struct file_t {
-	int flags;
-	void *priv;
-	void *vdev;
+class CDev;
 
-	file_t() : flags(0), priv(nullptr), vdev(nullptr) {}
-	file_t(int f, void *c) : flags(f), priv(nullptr), vdev(c) {}
+struct file_t {
+	int f_oflags{0};
+	void *f_priv{nullptr};
+	CDev *cdev{nullptr};
+
+	file_t() = default;
+	file_t(int f, CDev *c) : f_oflags(f), cdev(c) {}
 };
 
 } // namespace cdev

@@ -1,21 +1,29 @@
-#! /usr/bin/env python
+#!/usr/bin/env python3
 """ Script to generate Serial (UART) parameters and the ROMFS startup script """
-
-from __future__ import print_function
 
 import argparse
 import os
 import sys
 
-from jinja2 import Environment, FileSystemLoader
+try:
+    from jinja2 import Environment, FileSystemLoader
+except ImportError as e:
+    print("Failed to import jinja2: " + str(e))
+    print("")
+    print("You may need to install it using:")
+    print("    pip3 install --user jinja2")
+    print("")
+    sys.exit(1)
 
 try:
     import yaml
-except:
-    print("Failed to import yaml.")
-    print("You may need to install it with 'sudo pip install pyyaml'")
+except ImportError as e:
+    print("Failed to import yaml: " + str(e))
     print("")
-    raise
+    print("You may need to install it using:")
+    print("    pip3 install --user pyyaml")
+    print("")
+    sys.exit(1)
 
 
 ## Configuration
@@ -26,6 +34,7 @@ except:
 # with QGC (parameter metadata)
 serial_ports = {
     # index 0 means disabled
+    # index 1000 means ethernet condiguration
 
     # Generic
 #     "URT1": {
@@ -107,6 +116,32 @@ serial_ports = {
         "index": 202,
         "default_baudrate": 0,
         },
+    "GPS3": {
+        "label": "GPS 3",
+        "index": 203,
+        "default_baudrate": 0,
+        },
+
+    # RC Port
+    "RC": {
+        "label": "Radio Controller",
+        "index": 300,
+        "default_baudrate": 0,
+        },
+
+    # WIFI Port (PixRacer)
+    "WIFI": {
+        "label": "Wifi Port",
+        "index": 301,
+        "default_baudrate": 1, # set default to an unusable value to detect that this serial port has not been configured
+        },
+
+    # EXT2
+    "EXT2": {
+        "label": "EXT2",
+        "index": 401,
+        "default_baudrate": 57600,
+        },
 
     }
 
@@ -125,6 +160,8 @@ parser.add_argument('--rc-dir', type=str, action='store',
                     help='ROMFS output directory', default=None)
 parser.add_argument('--params-file', type=str, action='store',
                     help='Parameter output file', default=None)
+parser.add_argument('--ethernet', action='store_true',
+                    help='Ethernet support')
 parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
                     help='Verbose Output')
 
@@ -139,6 +176,7 @@ serial_params_output_file = args.params_file
 serial_params_template = 'serial_params.c.jinja'
 generate_for_all_ports = args.all_ports
 constrained_flash = args.constrained_flash
+ethernet_supported = args.ethernet
 
 if generate_for_all_ports:
     board_ports = [(key, "") for key in serial_ports]
@@ -154,7 +192,14 @@ if rc_serial_output_dir is None and serial_params_output_file is None:
 
 # parse the YAML files
 serial_commands = []
-additional_params = ""
+ethernet_configuration = []
+
+if ethernet_supported:
+    ethernet_configuration.append({
+        'tag': "ETH",
+        'label': "Ethernet",
+        'index': 1000
+        })
 
 def parse_yaml_serial_config(yaml_config):
     """ parse the serial_config section from the yaml config file """
@@ -168,84 +213,11 @@ def parse_yaml_serial_config(yaml_config):
         ret.append(serial_config)
     return ret
 
-def parse_yaml_parameters_config(yaml_config):
-    """ parse the parameters section from the yaml config file """
-    if 'parameters' not in yaml_config:
-        return ''
-    parameters_section_list = yaml_config['parameters']
-    for parameters_section in parameters_section_list:
-        if 'definitions' not in parameters_section:
-            return ''
-        definitions = parameters_section['definitions']
-        ret = ''
-        param_group = parameters_section.get('group', None)
-        for param_name in definitions:
-            param = definitions[param_name]
-            num_instances = param.get('num_instances', 1)
-            instance_start = param.get('instance_start', 0) # offset
-
-            # get the type and extract all tags
-            tags = '@group {:}'.format(param_group)
-            if param['type'] == 'enum':
-                param_type = 'INT32'
-                for key in param['values']:
-                    tags += '\n * @value {:} {:}'.format(key, param['values'][key])
-            elif param['type'] == 'boolean':
-                param_type = 'INT32'
-                tags += '\n * @boolean'
-            elif param['type'] == 'int32':
-                param_type = 'INT32'
-            elif param['type'] == 'float':
-                param_type = 'FLOAT'
-            else:
-                raise Exception("unknown param type {:}".format(param['type']))
-
-            for tag in ['decimal', 'increment', 'category', 'volatile', 'bit',
-                        'min', 'max', 'unit', 'reboot_required']:
-                if tag in param:
-                    tags += '\n * @{:} {:}'.format(tag, param[tag])
-
-            for i in range(num_instances):
-                # default value
-                default_value = 0
-                if 'default' in param:
-                    # default can be a list of num_instances or a single value
-                    if type(param['default']) == list:
-                        assert len(param['default']) == num_instances
-                        default_value = param['default'][i]
-                    else:
-                        default_value = param['default']
-
-                if type(default_value) == bool:
-                    default_value = int(default_value)
-
-                # output the existing C-style format
-                ret += '''
-/**
- * {short_descr}
- *
- * {long_descr}
- *
- * {tags}
- */
-PARAM_DEFINE_{param_type}({name}, {default_value});
-'''.format(short_descr=param['description']['short'].replace("\n", "\n * "),
-           long_descr=param['description']['long'].replace("\n", "\n * "),
-           tags=tags,
-           param_type=param_type,
-           name=param_name,
-           default_value=default_value,
-          ).replace('${i}', str(i+instance_start))
-    return ret
-
 for yaml_file in args.config_files:
     with open(yaml_file, 'r') as stream:
         try:
-            yaml_config = yaml.load(stream)
+            yaml_config = yaml.load(stream, Loader=yaml.Loader)
             serial_commands.extend(parse_yaml_serial_config(yaml_config))
-
-            # TODO: additional params should be parsed in a separate script
-            additional_params += parse_yaml_parameters_config(yaml_config)
 
         except yaml.YAMLError as exc:
             print(exc)
@@ -280,6 +252,15 @@ for serial_command in serial_commands:
     for i in range(num_instances):
         port_config = serial_command['port_config_param']
         port_param_name = port_config['name'].replace('${i}', str(i))
+
+        # check if a port dependency is specified
+        if 'depends_on_port' in port_config:
+            depends_on_port = port_config['depends_on_port']
+            if not any(p['tag'] == depends_on_port for p in serial_devices):
+                if verbose:
+                    print("Skipping {:} (missing dependent port)".format(port_param_name))
+                continue
+
         default_port = 0 # disabled
         if 'default' in port_config:
             if type(port_config['default']) == list:
@@ -287,10 +268,14 @@ for serial_command in serial_commands:
                 default_port_str = port_config['default'][i]
             else:
                 default_port_str = port_config['default']
+
             if default_port_str != "":
                 if default_port_str not in serial_ports:
                     raise Exception("Default Port {:} not found for {:}".format(default_port_str, serial_command['label']))
-                default_port = serial_ports[default_port_str]['index']
+
+                if default_port_str in dict(board_ports).keys():
+                    default_port = serial_ports[default_port_str]['index']
+
 
         commands.append({
             'command': serial_command['command'],
@@ -299,7 +284,9 @@ for serial_command in serial_commands:
             'multi_instance': num_instances > 1,
             'port_param_name': port_param_name,
             'default_port': default_port,
-            'param_group': port_config['group']
+            'param_group': port_config['group'],
+            'description_extended': port_config.get('description_extended', ''),
+			'supports_networking': serial_command.get('supports_networking', False)
             })
 
 if verbose:
@@ -332,6 +319,7 @@ if rc_serial_output_dir is not None:
         template = jinja_env.get_template(rc_serial_port_template)
         with open(rc_serial_port_output_file, 'w') as fid:
             fid.write(template.render(serial_devices=serial_devices,
+                ethernet_configuration=ethernet_configuration,
                 constrained_flash=constrained_flash))
 
 # parameter definitions
@@ -340,6 +328,6 @@ if serial_params_output_file is not None:
     template = jinja_env.get_template(serial_params_template)
     with open(serial_params_output_file, 'w') as fid:
         fid.write(template.render(serial_devices=serial_devices,
-            commands=commands, serial_ports=serial_ports,
-            additional_definitions=additional_params))
+            ethernet_configuration=ethernet_configuration,
+            commands=commands, serial_ports=serial_ports))
 

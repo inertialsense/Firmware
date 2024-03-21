@@ -1,43 +1,19 @@
-[submodule "mavlink/include/mavlink/v2.0"]
-	path = mavlink/include/mavlink/v2.0
-	url = https://github.com/mavlink/c_library_v2.git
+[submodule "src/modules/mavlink/mavlink"]
+	path = src/modules/mavlink/mavlink
+	url = https://github.com/mavlink/mavlink.git
 	branch = master
-[submodule "src/modules/uavcan/libuavcan"]
-	path = src/modules/uavcan/libuavcan
-	url = https://github.com/UAVCAN/libuavcan.git
-	branch = master
-[submodule "msg/tools/genmsg"]
-	path = msg/tools/genmsg
-	url = https://github.com/ros/genmsg.git
-	branch = indigo-devel
-[submodule "msg/tools/gencpp"]
-	path = msg/tools/gencpp
-	url = https://github.com/ros/gencpp.git
-	branch = indigo-devel
-[submodule "Tools/jMAVSim"]
-	path = Tools/jMAVSim
+[submodule "src/drivers/uavcan/libuavcan"]
+	path = src/drivers/uavcan/libuavcan
+	url = https://github.com/dronecan/libuavcan.git
+	branch = main
+[submodule "Tools/simulation/jmavsim/jMAVSim"]
+	path = Tools/simulation/jmavsim/jMAVSim
 	url = https://github.com/PX4/jMAVSim.git
-	branch = master
-[submodule "Tools/sitl_gazebo"]
-	path = Tools/sitl_gazebo
-	url = https://github.com/PX4/sitl_gazebo.git
-	branch = master
-[submodule "src/lib/matrix"]
-	path = src/lib/matrix
-	url = https://github.com/PX4/Matrix.git
-	branch = master
-[submodule "src/lib/DriverFramework"]
-	path = src/lib/DriverFramework
-	url = https://github.com/PX4/DriverFramework.git
-	branch = master
-[submodule "src/lib/ecl"]
-	path = src/lib/ecl
-	url = https://github.com/PX4/ecl.git
-	branch = master
-[submodule "cmake/cmake_hexagon"]
-	path = cmake/cmake_hexagon
-	url = https://github.com/ATLFlight/cmake_hexagon.git
-	branch = master
+	branch = main
+[submodule "Tools/simulation/gazebo-classic/sitl_gazebo-classic"]
+	path = Tools/simulation/gazebo-classic/sitl_gazebo-classic
+	url = https://github.com/PX4/PX4-SITL_gazebo-classic.git
+	branch = main
 [submodule "src/drivers/gps/devices"]
 	path = src/drivers/gps/devices
 	url = https://github.com/inertialsense/GpsDrivers.git
@@ -46,15 +22,70 @@
 	path = src/modules/micrortps_bridge/micro-CDR
 	url = https://github.com/eProsima/micro-CDR.git
 	branch = master
+	url = https://github.com/PX4/PX4-GPSDrivers.git
+	branch = main
 [submodule "platforms/nuttx/NuttX/nuttx"]
 	path = platforms/nuttx/NuttX/nuttx
-	url = https://github.com/PX4-NuttX/nuttx.git
-	branch = px4_firmware_nuttx-7.22+
+	url = https://github.com/PX4/NuttX.git
+	branch = px4_firmware_nuttx-10.3.0+
 [submodule "platforms/nuttx/NuttX/apps"]
 	path = platforms/nuttx/NuttX/apps
-	url = https://github.com/PX4-NuttX/apps.git
-	branch = px4_firmware_nuttx-7.22+
-[submodule "cmake/configs/uavcan_board_ident"]
-	path = cmake/configs/uavcan_board_ident
-	url = https://github.com/PX4/uavcan_board_ident.git
-	branch = master
+	url = https://github.com/PX4/NuttX-apps.git
+	branch = px4_firmware_nuttx-10.3.0+
+[submodule "Tools/flightgear_bridge"]
+	path = Tools/simulation/flightgear/flightgear_bridge
+	url = https://github.com/PX4/PX4-FlightGear-Bridge.git
+[submodule "Tools/simulation/jsbsim/jsbsim_bridge"]
+	path = Tools/simulation/jsbsim/jsbsim_bridge
+	url = https://github.com/PX4/px4-jsbsim-bridge.git
+[submodule "src/drivers/cyphal/libcanard"]
+	path = src/drivers/cyphal/libcanard
+	url = https://github.com/opencyphal/libcanard.git
+[submodule "src/drivers/cyphal/public_regulated_data_types"]
+	path = src/drivers/cyphal/public_regulated_data_types
+	url = https://github.com/opencyphal/public_regulated_data_types.git
+[submodule "src/drivers/cyphal/legacy_data_types"]
+	path = src/drivers/cyphal/legacy_data_types
+	url = https://github.com/PX4/public_regulated_data_types.git
+	branch = legacy
+[submodule "src/lib/crypto/monocypher"]
+	path = src/lib/crypto/monocypher
+	url = https://github.com/PX4/Monocypher.git
+	branch = px4
+[submodule "src/lib/events/libevents"]
+	path = src/lib/events/libevents
+	url = https://github.com/mavlink/libevents.git
+	branch = main
+[submodule "src/lib/crypto/libtomcrypt"]
+	path = src/lib/crypto/libtomcrypt
+	url = https://github.com/PX4/libtomcrypt.git
+	branch = px4
+[submodule "src/lib/crypto/libtommath"]
+	path = src/lib/crypto/libtommath
+	url = https://github.com/PX4/libtommath.git
+	branch = px4
+[submodule "src/modules/uxrce_dds_client/Micro-XRCE-DDS-Client"]
+	path = src/modules/uxrce_dds_client/Micro-XRCE-DDS-Client
+	url = https://github.com/PX4/Micro-XRCE-DDS-Client.git
+	branch = px4
+[submodule "src/lib/cdrstream/cyclonedds"]
+	path = src/lib/cdrstream/cyclonedds
+	url = https://github.com/px4/cyclonedds
+[submodule "src/lib/cdrstream/rosidl"]
+	path = src/lib/cdrstream/rosidl
+	url = https://github.com/px4/rosidl
+[submodule "src/modules/zenoh/zenoh-pico"]
+	path = src/modules/zenoh/zenoh-pico
+	url = https://github.com/px4/zenoh-pico
+	branch = pr-zubf-werror-fix
+[submodule "src/lib/heatshrink/heatshrink"]
+	path = src/lib/heatshrink/heatshrink
+	url = https://github.com/PX4/heatshrink.git
+	branch = px4
+[submodule "Tools/simulation/gz"]
+	path = Tools/simulation/gz
+	url = https://github.com/PX4/PX4-gazebo-models.git
+	branch = main
+[submodule "boards/modalai/voxl2/libfc-sensor-api"]
+	path = src/modules/muorb/apps/libfc-sensor-api
+	url = https://gitlab.com/voxl-public/voxl-sdk/core-libs/libfc-sensor-api.git

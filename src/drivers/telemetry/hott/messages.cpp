@@ -42,14 +42,16 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <lib/ecl/geo/geo.h>
+#include <lib/geo/geo.h>
 #include <unistd.h>
+#include <px4_platform_common/defines.h>
 #include <uORB/topics/airspeed.h>
 #include <uORB/topics/battery_status.h>
 #include <uORB/topics/esc_status.h>
+#include <uORB/topics/actuator_motors.h>
 #include <uORB/topics/home_position.h>
 #include <uORB/topics/vehicle_air_data.h>
-#include <uORB/topics/vehicle_gps_position.h>
+#include <uORB/topics/sensor_gps.h>
 
 #include <drivers/drv_hrt.h>
 
@@ -113,9 +115,9 @@ publish_gam_message(const uint8_t *buffer)
 	esc.esc_count = 1;
 	esc.esc_connectiontype = esc_status_s::ESC_CONNECTION_TYPE_PPM;
 
-	esc.esc[0].esc_vendor = esc_status_s::ESC_VENDOR_GRAUPNER_HOTT;
+	esc.esc[0].actuator_function = actuator_motors_s::ACTUATOR_FUNCTION_MOTOR1;
 	esc.esc[0].esc_rpm = (uint16_t)((msg.rpm_H << 8) | (msg.rpm_L & 0xff)) * 10;
-	esc.esc[0].esc_temperature = static_cast<float>(msg.temperature1) - 20.0F;
+	esc.esc[0].esc_temperature = static_cast<float>(msg.temperature1 - 20);
 	esc.esc[0].esc_voltage = static_cast<float>((msg.main_voltage_H << 8) | (msg.main_voltage_L & 0xff)) * 0.1F;
 	esc.esc[0].esc_current = static_cast<float>((msg.current_H << 8) | (msg.current_L & 0xff)) * 0.1F;
 
@@ -186,7 +188,9 @@ build_gam_response(uint8_t *buffer, size_t *size)
 	msg.gam_sensor_id = GAM_SENSOR_ID;
 	msg.sensor_text_id = GAM_SENSOR_TEXT_ID;
 
-	msg.temperature1 = (uint8_t)(esc.esc[0].esc_temperature + 20.0F);
+	const int16_t esc_temp_offset_degC = (esc.esc[0].esc_temperature + 20) > UINT8_MAX ? UINT8_MAX :
+					     (esc.esc[0].esc_temperature + 20);
+	msg.temperature1 = (esc_temp_offset_degC < 0) ? 0 : esc_temp_offset_degC;
 	msg.temperature2 = 20;  // 0 deg. C.
 
 	const uint16_t voltage = (uint16_t)(esc.esc[0].esc_voltage * 10.0F);
@@ -209,7 +213,7 @@ void
 build_gps_response(uint8_t *buffer, size_t *size)
 {
 	/* get a local copy of the battery data */
-	struct vehicle_gps_position_s gps;
+	struct sensor_gps_s gps;
 	memset(&gps, 0, sizeof(gps));
 	orb_copy(ORB_ID(vehicle_gps_position), _gps_sub, &gps);
 
@@ -238,14 +242,14 @@ build_gps_response(uint8_t *buffer, size_t *size)
 		msg.gps_speed_H = (uint8_t)(speed >> 8) & 0xff;
 
 		/* Get latitude in degrees, minutes and seconds */
-		double lat = ((double)(gps.lat)) * 1e-7d;
+		double lat = gps.latitude_deg;
 
 		/* Set the N or S specifier */
 		msg.latitude_ns = 0;
 
 		if (lat < 0) {
 			msg.latitude_ns = 1;
-			lat = abs(lat);
+			lat = fabs(lat);
 		}
 
 		int deg;
@@ -261,7 +265,7 @@ build_gps_response(uint8_t *buffer, size_t *size)
 		msg.latitude_sec_H = (uint8_t)(lat_sec >> 8) & 0xff;
 
 		/* Get longitude in degrees, minutes and seconds */
-		double lon = ((double)(gps.lon)) * 1e-7d;
+		double lon = gps.longitude_deg;
 
 		/* Set the E or W specifier */
 		msg.longitude_ew = 0;
@@ -281,7 +285,7 @@ build_gps_response(uint8_t *buffer, size_t *size)
 		msg.longitude_sec_H = (uint8_t)(lon_sec >> 8) & 0xff;
 
 		/* Altitude */
-		uint16_t alt = (uint16_t)(gps.alt * 1e-3f + 500.0f);
+		uint16_t alt = (uint16_t)(round(gps.altitude_msl_m) + 500.0);
 		msg.altitude_L = (uint8_t)alt & 0xff;
 		msg.altitude_H = (uint8_t)(alt >> 8) & 0xff;
 
@@ -295,9 +299,11 @@ build_gps_response(uint8_t *buffer, size_t *size)
 			memset(&home, 0, sizeof(home));
 			orb_copy(ORB_ID(home_position), _home_sub, &home);
 
-			_home_lat = home.lat;
-			_home_lon = home.lon;
-			_home_position_set = true;
+			if (home.valid_hpos) {
+				_home_lat = home.lat;
+				_home_lon = home.lon;
+				_home_position_set = true;
+			}
 		}
 
 		/* Distance from home */

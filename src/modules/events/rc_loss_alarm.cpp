@@ -38,73 +38,68 @@
 
 #include "rc_loss_alarm.h"
 
-#include <px4_defines.h>
+#include <px4_platform_common/defines.h>
 
 #include <drivers/drv_hrt.h>
 #include <stdint.h>
 
 #include <tunes/tune_definition.h>
 
-#include <uORB/topics/tune_control.h>
-
 namespace events
 {
 namespace rc_loss
 {
 
-RC_Loss_Alarm::RC_Loss_Alarm(const events::SubscriberHandler &subscriber_handler)
-	: _subscriber_handler(subscriber_handler)
-{
-}
-
-bool RC_Loss_Alarm::check_for_updates()
-{
-	if (_subscriber_handler.vehicle_status_updated()) {
-		orb_copy(ORB_ID(vehicle_status), _subscriber_handler.get_vehicle_status_sub(), &_vehicle_status);
-		return true;
-	}
-
-	return false;
-}
-
 void RC_Loss_Alarm::process()
 {
-	if (!check_for_updates()) {
+	vehicle_status_s status{};
+
+	if (!_vehicle_status_sub.update(&status)) {
 		return;
 	}
 
+	failsafe_flags_s failsafe_flags{};
+
+	_failsafe_flags_sub.copy(&failsafe_flags);
+
 	if (!_was_armed &&
-	    _vehicle_status.arming_state == vehicle_status_s::ARMING_STATE_ARMED) {
+	    status.arming_state == vehicle_status_s::ARMING_STATE_ARMED) {
 
 		_was_armed = true;	// Once true, impossible to go back to false
 	}
 
-	if (!_had_rc && !_vehicle_status.rc_signal_lost) {
+	if (!_had_manual_control && !failsafe_flags.manual_control_signal_lost) {
 
-		_had_rc = true;
+		_had_manual_control = true;
 	}
 
-	if (_was_armed && _had_rc && _vehicle_status.rc_signal_lost &&
-	    _vehicle_status.arming_state != vehicle_status_s::ARMING_STATE_ARMED) {
-
+	if (_was_armed && _had_manual_control && failsafe_flags.manual_control_signal_lost &&
+	    status.arming_state != vehicle_status_s::ARMING_STATE_ARMED) {
 		play_tune();
+		_alarm_playing = true;
+
+	} else if (_alarm_playing) {
+		stop_tune();
+		_alarm_playing = false;
 	}
 }
 
 void RC_Loss_Alarm::play_tune()
 {
-	struct tune_control_s tune_control = {};
-	tune_control.tune_id = static_cast<int>(TuneID::ERROR_TUNE);
-	tune_control.strength = tune_control_s::STRENGTH_MAX;
-	tune_control.tune_override = 1;
+	tune_control_s tune_control{};
+	tune_control.tune_id = tune_control_s::TUNE_ID_ERROR;
+	tune_control.tune_override = true;
+	tune_control.volume = tune_control_s::VOLUME_LEVEL_MAX;
 	tune_control.timestamp = hrt_absolute_time();
+	_tune_control_pub.publish(tune_control);
+}
 
-	if (_tune_control_pub == nullptr) {
-		_tune_control_pub = orb_advertise(ORB_ID(tune_control), &tune_control);
-
-	} else	{
-		orb_publish(ORB_ID(tune_control), _tune_control_pub, &tune_control);
-	}
+void RC_Loss_Alarm::stop_tune()
+{
+	tune_control_s tune_control{};
+	tune_control.tune_override = true;
+	tune_control.timestamp = hrt_absolute_time();
+	_tune_control_pub.publish(tune_control);
 }
 
 } /* namespace rc_loss */

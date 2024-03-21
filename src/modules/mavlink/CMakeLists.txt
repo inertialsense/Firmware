@@ -1,6 +1,6 @@
 ############################################################################
 #
-#   Copyright (c) 2015-2017 PX4 Development Team. All rights reserved.
+#   Copyright (c) 2015-2023 PX4 Development Team. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -31,42 +31,137 @@
 #
 ############################################################################
 
-px4_add_git_submodule(TARGET git_mavlink_v2 PATH "${PX4_SOURCE_DIR}/mavlink/include/mavlink/v2.0")
+set(MAVLINK_GIT_DIR "${CMAKE_CURRENT_LIST_DIR}/mavlink")
+set(MAVLINK_LIBRARY_DIR "${CMAKE_BINARY_DIR}/mavlink")
+file(RELATIVE_PATH MAVLINK_GIT_DIR_RELATIVE ${CMAKE_SOURCE_DIR} ${MAVLINK_GIT_DIR})
+
+px4_add_git_submodule(TARGET git_mavlink_v2 PATH "${MAVLINK_GIT_DIR}")
+
+# always generate uAvionix dialect
+set(MAVLINK_DIALECT_UAVIONIX "uAvionix")
+add_custom_command(
+	OUTPUT ${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}/${MAVLINK_DIALECT_UAVIONIX}.h
+	COMMAND
+		${PYTHON_EXECUTABLE} ${MAVLINK_GIT_DIR}/pymavlink/tools/mavgen.py
+			--lang C --wire-protocol 2.0
+			#--no-validate
+			#--strict-units
+			--output ${MAVLINK_LIBRARY_DIR}
+			${MAVLINK_GIT_DIR}/message_definitions/v1.0/${MAVLINK_DIALECT_UAVIONIX}.xml > ${CMAKE_CURRENT_BINARY_DIR}/mavgen_${MAVLINK_DIALECT_UAVIONIX}.log
+	DEPENDS
+		git_mavlink_v2
+		${MAVLINK_GIT_DIR}/pymavlink/tools/mavgen.py
+		${MAVLINK_GIT_DIR}/message_definitions/v1.0/${MAVLINK_DIALECT_UAVIONIX}.xml
+
+	COMMENT "Generating Mavlink ${MAVLINK_DIALECT_UAVIONIX}: ${MAVLINK_GIT_DIR_RELATIVE}/message_definitions/v1.0/${MAVLINK_DIALECT_UAVIONIX}.xml"
+)
+add_custom_target(mavlink_c_generate_uavionix DEPENDS ${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}/${MAVLINK_DIALECT_UAVIONIX}.h)
+set_source_files_properties(${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}/${MAVLINK_DIALECT_UAVIONIX}.h PROPERTIES GENERATED true)
+
+# generate the primary dialect
+add_custom_command(
+	OUTPUT ${MAVLINK_LIBRARY_DIR}/${CONFIG_MAVLINK_DIALECT}/${CONFIG_MAVLINK_DIALECT}.h
+	COMMAND
+		${PYTHON_EXECUTABLE} ${MAVLINK_GIT_DIR}/pymavlink/tools/mavgen.py
+			--lang C --wire-protocol 2.0
+			#--no-validate
+			#--strict-units
+			--output ${MAVLINK_LIBRARY_DIR}
+			${MAVLINK_GIT_DIR}/message_definitions/v1.0/${CONFIG_MAVLINK_DIALECT}.xml > ${CMAKE_CURRENT_BINARY_DIR}/mavgen_${CONFIG_MAVLINK_DIALECT}.log
+	DEPENDS
+		git_mavlink_v2
+		${MAVLINK_GIT_DIR}/pymavlink/tools/mavgen.py
+		${MAVLINK_GIT_DIR}/message_definitions/v1.0/${CONFIG_MAVLINK_DIALECT}.xml
+		${BOARD_DEFCONFIG}
+
+		# generate after uAvionix
+		mavlink_c_generate_uavionix
+		${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}/${MAVLINK_DIALECT_UAVIONIX}.h
+
+	COMMENT "Generating Mavlink ${CONFIG_MAVLINK_DIALECT}: ${MAVLINK_GIT_DIR_RELATIVE}/message_definitions/v1.0/${CONFIG_MAVLINK_DIALECT}.xml"
+)
+add_custom_target(mavlink_c_generate DEPENDS ${MAVLINK_LIBRARY_DIR}/${CONFIG_MAVLINK_DIALECT}/${CONFIG_MAVLINK_DIALECT}.h)
+set_source_files_properties(${MAVLINK_LIBRARY_DIR}/${CONFIG_MAVLINK_DIALECT}/${CONFIG_MAVLINK_DIALECT}.h PROPERTIES GENERATED true)
+
+
+
+# mavlink header only library
+add_library(mavlink_c INTERFACE)
+target_compile_options(mavlink_c INTERFACE -Wno-address-of-packed-member -Wno-cast-align)
+target_sources(mavlink_c
+	INTERFACE
+		${MAVLINK_LIBRARY_DIR}/${CONFIG_MAVLINK_DIALECT}/${CONFIG_MAVLINK_DIALECT}.h
+		${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}/${MAVLINK_DIALECT_UAVIONIX}.h
+)
+target_include_directories(mavlink_c
+	INTERFACE
+		${MAVLINK_LIBRARY_DIR}
+		${MAVLINK_LIBRARY_DIR}/${CONFIG_MAVLINK_DIALECT}
+		${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}
+)
 
 px4_add_module(
 	MODULE modules__mavlink
 	MAIN mavlink
-	STACK_MAIN 1200
-	STACK_MAX 1500
 	COMPILE_FLAGS
-	INCLUDES
-		${PX4_SOURCE_DIR}/mavlink/include/mavlink
+		-Wno-enum-compare # ROTATION <-> MAV_SENSOR_ROTATION
+		#-DDEBUG_BUILD
 	SRCS
 		mavlink.c
 		mavlink_command_sender.cpp
+		mavlink_events.cpp
 		mavlink_ftp.cpp
-		mavlink_high_latency2.cpp
 		mavlink_log_handler.cpp
 		mavlink_main.cpp
 		mavlink_messages.cpp
 		mavlink_mission.cpp
-		mavlink_orb_subscription.cpp
 		mavlink_parameters.cpp
 		mavlink_rate_limiter.cpp
 		mavlink_receiver.cpp
 		mavlink_shell.cpp
 		mavlink_simple_analyzer.cpp
 		mavlink_stream.cpp
-		mavlink_ulog.cpp
 		mavlink_timesync.cpp
+		mavlink_ulog.cpp
+		MavlinkStatustextHandler.cpp
+		tune_publisher.cpp
 	MODULE_CONFIG
 		module.yaml
 	DEPENDS
+		adsb
 		airspeed
-		git_mavlink_v2
+		component_general_json # for checksums.h
+		dataman_client
+		drivers_accelerometer
+		drivers_gyroscope
+		drivers_magnetometer
 		conversion
-		git_ecl
-		ecl_geo
+		sensor_calibration
+		geo
+		mavlink_c
+		timesync
+		tunes
+		variable_length_ringbuffer
 		version
 	UNITY_BUILD
 	)
+
+if(PX4_TESTING)
+	add_subdirectory(mavlink_tests)
+endif()
+
+px4_add_unit_gtest(SRC MavlinkStatustextHandlerTest.cpp
+	INCLUDES
+		${MAVLINK_LIBRARY_DIR}
+		${MAVLINK_LIBRARY_DIR}/${CONFIG_MAVLINK_DIALECT}
+		${MAVLINK_LIBRARY_DIR}/${MAVLINK_DIALECT_UAVIONIX}
+	COMPILE_FLAGS
+		-Wno-address-of-packed-member # TODO: fix in c_library_v2
+		-Wno-cast-align # TODO: fix
+	LINKLIBS
+		modules__mavlink
+	)
+
+if(CONFIG_NET AND "${PX4_PLATFORM}" MATCHES "nuttx")
+	target_link_libraries(modules__mavlink PRIVATE nuttx_apps) # netlib_get_ipv4netmask
+endif()
