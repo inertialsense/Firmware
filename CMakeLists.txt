@@ -467,6 +467,7 @@ endif()
 #=============================================================================
 # Metadata - helpers for generating documentation
 #
+#
 
 add_custom_target(metadata_airframes
 	COMMAND ${CMAKE_COMMAND} -E make_directory ${PX4_BINARY_DIR}/docs
